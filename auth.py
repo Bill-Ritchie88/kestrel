@@ -7,9 +7,10 @@ just enough claims for main.py to authorize the passenger's own booking
 without a second database round trip, and it is what lets
 audit_actor() derive an unforgeable actor string for the audit trail.
 
-No JWT library is used deliberately: the project has no requirements.txt and
-the token only needs to survive one process's lifetime, so a minimal
-stdlib-only HMAC scheme avoids an undeclared dependency.
+No JWT library is used deliberately. The token only needs to survive one
+process's lifetime and carries four claims, so a minimal stdlib-only HMAC
+scheme avoids a dependency that would have to be justified in Table 5.2 and
+kept patched for the life of the project.
 """
 
 import base64
