@@ -1,0 +1,45 @@
+# Local hooks. Install once:
+#   pip install pre-commit
+#   pre-commit install
+#
+# After that every `git commit` is checked before the commit is created, which
+# is the point: the .env incident in this repository happened at commit time,
+# not at review time.
+
+default_stages: [pre-commit]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        args: ["--maxkb=5000"]
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+        files: ^Project Kestrel/project/.*\.(py|sql|md|toml|yaml|yml)$
+      - id: trailing-whitespace
+        files: ^Project Kestrel/project/.*\.(py|sql|md|toml|yaml|yml)$
+      - id: check-yaml
+      - id: check-toml
+      - id: detect-private-key
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+        files: ^Project Kestrel/project/.*\.(py|sql|md|toml|yaml|yml)$
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.7.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: ^Project Kestrel/project/.*\.py$
+      - id: ruff-format
+        files: ^Project Kestrel/project/.*\.py$
+
+  - repo: local
+    hooks:
+      - id: kestrel-secret-scan
+        name: Kestrel secret scan
+        entry: python "Project Kestrel/project/scripts/check_secrets.py"
+        language: system
+        pass_filenames: false
+        always_run: true

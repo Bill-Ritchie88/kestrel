@@ -1,0 +1,52 @@
+name: Project Kestrel CI
+
+# Runs on every push and pull request that touches the project. The repository
+# also holds other coursework, so the paths filter keeps unrelated commits from
+# triggering a Python build.
+
+on:
+  push:
+    branches: [main, "sprint-*/**"]
+    paths: ["Project Kestrel/project/**", ".github/workflows/ci.yml"]
+  pull_request:
+    paths: ["Project Kestrel/project/**", ".github/workflows/ci.yml"]
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: "Project Kestrel/project"
+
+jobs:
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail if a credential or .env is tracked
+        run: python scripts/check_secrets.py
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install ruff
+      - run: ruff check . --output-format=github
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      # No DATABASE_URL is configured, so tests marked `integration` skip
+      # themselves. The unit suite must pass without any credentials.
+      - run: pytest -v
