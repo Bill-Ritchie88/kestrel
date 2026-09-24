@@ -1,0 +1,36 @@
+# Project Kestrel - tool configuration.
+#
+# Not a packaging manifest: the project runs from the folder rather than being
+# installed. This file exists so linting and test settings are declared once
+# and are identical on the workstation and in CI.
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+exclude = ["__pycache__", ".venv", "venv"]
+
+[tool.ruff.lint]
+# E/F  pyflakes + pycodestyle errors
+# I    import ordering
+# B    bugbear (mutable defaults, unused loop vars)
+# S    bandit security rules - the .env incident is why this is on
+# UP   pyupgrade
+select = ["E", "F", "I", "B", "S", "UP", "W"]
+ignore = [
+    "E501",    # line length is handled by the formatter
+    "S101",    # assert is expected in tests
+    "B008",    # FastAPI Depends() in defaults is the documented pattern
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S105", "S106"]        # hardcoded test secrets are deliberate
+"scripts/*" = ["S311"]              # random is for synthetic data, not crypto
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+markers = [
+    "integration: requires a live DATABASE_URL; skipped when it is unset",
+]
+filterwarnings = ["error::DeprecationWarning"]

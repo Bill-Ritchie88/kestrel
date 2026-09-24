@@ -1,0 +1,29 @@
+# Project Kestrel - direct runtime dependencies.
+#
+# Floors only. Exact tested versions, including the transitive closure, are
+# recorded in requirements.lock.txt, which is what Table 5.2 of the report is
+# filled from. Regenerate the lock after any change here:
+#
+#   pip install -r requirements.txt
+#   pip freeze > requirements.lock.txt
+#
+# Python 3.13 (the tracked bytecode was cpython-313).
+
+# REST tier
+fastapi>=0.115
+uvicorn[standard]>=0.32
+pydantic>=2.9
+
+# Database
+asyncpg>=0.30
+
+# Configuration
+python-dotenv>=1.0
+
+# Agent tier
+httpx>=0.27
+langchain-core>=0.3
+langchain-google-genai>=2.0
+
+# Test data generation
+faker>=30.0
