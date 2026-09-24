@@ -1,0 +1,27 @@
+# Normalise line endings.
+#
+# Without this, a file saved by a Windows editor is stored with CRLF and every
+# later diff shows the whole file as changed. Before this file was added, the
+# working tree carried an ~900 line diff across agent.py, main.py and two SQL
+# files in which not one line of content had actually changed.
+#
+# After adding or changing rules here, renormalise:
+#   git add --renormalize .
+
+* text=auto eol=lf
+
+# Windows-only files keep CRLF.
+*.ps1  text eol=crlf
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+# Binary: never touch, never diff as text.
+*.png  binary
+*.jpg  binary
+*.pdf  binary
+*.docx binary
+*.pptx binary
+*.xlsx binary
+*.mp3  binary
+*.mp4  binary
+*.pyc  binary
