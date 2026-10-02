@@ -9,7 +9,7 @@ record-locator formats do not 422 at the edge of the range.
 import pytest
 from pydantic import ValidationError
 
-from main import AuthRequest, ReaccommodateRequest
+from kestrel.api.main import AuthRequest, ReaccommodateRequest
 
 
 class TestAuthRequest:

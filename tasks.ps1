@@ -16,7 +16,7 @@ $Py = if (Test-Path ".venv\Scripts\python.exe") { ".venv\Scripts\python.exe" } e
 function Invoke-Setup {
     python -m venv .venv
     .venv\Scripts\python.exe -m pip install --upgrade pip
-    .venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
+    .venv\Scripts\python.exe -m pip install -r requirements-dev.txt -e .
     Write-Host "Now: copy .env.example to .env and fill it in" -ForegroundColor Yellow
 }
 
@@ -26,16 +26,16 @@ switch ($Target) {
                  Write-Host "requirements.lock.txt written" }
     "lint"     { & $Py -m ruff check . }
     "fmt"      { & $Py -m ruff check . --fix; & $Py -m ruff format . }
-    "test"     { & $Py -m pytest -v }
-    "test-all" { & $Py -m pytest -v -m "integration or not integration" }
-    "smoke"    { & $Py database.py }
+    "test"     { & $Py -m pytest -v tests/unit }
+    "test-all" { & $Py scripts/reset_demo.py --if-stale; & $Py -m pytest -v }
+    "smoke"    { & $Py scripts/smoke_test.py }
     "data"     { & $Py scripts/dataset_generator.py --truncate --days 7 --seed 42 }
-    "reset"    { Get-Content sql/Reset_demo_state.sql }
-    "api"      { & $Py -m uvicorn main:app --reload }
-    "agent"    { & $Py agent.py }
+    "reset"    { & $Py scripts/reset_demo.py }
+    "api"      { & $Py -m uvicorn kestrel.api.main:app --reload }
+    "agent"    { & $Py scripts/agent_demo.py }
     "hooks"    { & $Py -m pre_commit install; & $Py -m pre_commit run --all-files }
-    "clean"    { Remove-Item -Recurse -Force __pycache__, .pytest_cache, .ruff_cache,
-                              tests\__pycache__ -ErrorAction SilentlyContinue }
+    "clean"    { Get-ChildItem -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
+                 Remove-Item -Recurse -Force .pytest_cache, .ruff_cache, src\*.egg-info -ErrorAction SilentlyContinue }
     default {
         Write-Host "Project Kestrel tasks:`n"
         @(
@@ -44,12 +44,12 @@ switch ($Target) {
             @("lint",     "Static analysis"),
             @("fmt",      "Auto-fix formatting and import order"),
             @("test",     "Unit tests only (no database needed)"),
-            @("test-all", "Unit + integration tests (needs DATABASE_URL)"),
+            @("test-all", "Unit + integration tests (resets stale demo data)"),
             @("smoke",    "Verify DB connection and stored procedure"),
             @("data",     "Regenerate the synthetic dataset"),
-            @("reset",    "Print the demo reset SQL"),
+            @("reset",    "Reset the demo data to now"),
             @("api",      "Run the REST tier with reload"),
-            @("agent",    "Run the agent tier"),
+            @("agent",    "Run the agent for a disrupted passenger"),
             @("hooks",    "Install pre-commit hooks"),
             @("clean",    "Remove caches")
         ) | ForEach-Object { "  {0,-10} {1}" -f $_[0], $_[1] }

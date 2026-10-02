@@ -14,15 +14,21 @@ BEGIN;
 -- ---------------------------------------------------------------------------
 -- 1. Reschedule every flight relative to now(), preserving the original
 --    spacing between departures so that "next available flight" still has a
---    meaningful answer. The earliest flight lands two hours from now.
+--    meaningful answer. The shift is a whole number of days, so a departure
+--    keeps its Nairobi local time (the generator banks 06:00 departures at
+--    06:00) and a service number still belongs to one calendar day. The
+--    earliest flight lands between two and 26 hours from now.
 -- ---------------------------------------------------------------------------
-WITH anchor AS (
-    SELECT min(departure_time) AS t0 FROM flights
+WITH shift AS (
+    SELECT make_interval(days => ceil(
+               extract(epoch FROM now() + interval '2 hours' - min(departure_time)) / 86400
+           )::int) AS d
+    FROM flights
 )
 UPDATE flights f
-SET departure_time = now() + interval '2 hours' + (f.departure_time - a.t0),
-    arrival_time   = now() + interval '2 hours' + (f.arrival_time   - a.t0)
-FROM anchor a;
+SET departure_time = f.departure_time + s.d,
+    arrival_time   = f.arrival_time   + s.d
+FROM shift s;
 
 -- ---------------------------------------------------------------------------
 -- 2. Every flight operating, every seat free, every booking on its original
@@ -60,8 +66,8 @@ WHERE b.assigned_seat_id IS NOT NULL
   );
 
 -- ---------------------------------------------------------------------------
--- 4. Create the disruption: cancel the two future flights carrying the most
---    passengers. Choosing by booking volume guarantees genuine contention for
+-- 4. Create the disruption: cancel the three future flights carrying the most
+--    passengers, matching the generator's default --cancel 3. Choosing by booking volume guarantees genuine contention for
 --    the remaining seats, which is the condition the pessimistic locking in
 --    reaccommodate_passenger_atomic exists to handle.
 -- ---------------------------------------------------------------------------
@@ -73,7 +79,7 @@ WHERE flight_id IN (
     WHERE f.departure_time > now()
     GROUP BY f.flight_id
     ORDER BY count(b.pnr_code) DESC
-    LIMIT 2
+    LIMIT 3
 );
 
 UPDATE pnr_bookings b

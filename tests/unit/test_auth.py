@@ -12,7 +12,7 @@ import time
 
 import pytest
 
-import auth
+from kestrel.api import auth
 
 
 class TestTokenRoundTrip:
@@ -39,10 +39,8 @@ class TestTamperResistance:
         payload_b64, signature = token.split(".")
 
         payload = json.loads(auth._b64url_decode(payload_b64))
-        payload["pnr_code"] = "AAAAAA"          # someone else's booking
-        forged_b64 = auth._b64url_encode(
-            json.dumps(payload, separators=(",", ":")).encode()
-        )
+        payload["pnr_code"] = "AAAAAA"  # someone else's booking
+        forged_b64 = auth._b64url_encode(json.dumps(payload, separators=(",", ":")).encode())
 
         with pytest.raises(ValueError):
             auth._decode_token(f"{forged_b64}.{signature}")

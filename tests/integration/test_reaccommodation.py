@@ -8,7 +8,7 @@ Every test runs inside a transaction that is rolled back, so the suite can be
 run against the demonstration database without disturbing it.
 
 These cover the defects migration 003 corrected. Each one failed against the
-baseline procedure in sql/baseline_reaccommodate_passenger_atomic.sql.
+baseline procedure in db/migrations/001_baseline_reaccommodate_passenger_atomic.sql.
 """
 
 import os
@@ -21,9 +21,7 @@ pytestmark = pytest.mark.integration
 
 @pytest.fixture
 async def conn():
-    connection = await asyncpg.connect(
-        os.environ["DATABASE_URL"], statement_cache_size=0
-    )
+    connection = await asyncpg.connect(os.environ["DATABASE_URL"], statement_cache_size=0)
     transaction = connection.transaction()
     await transaction.start()
     try:
@@ -36,26 +34,27 @@ async def conn():
 @pytest.fixture
 async def disrupted(conn):
     """A disrupted booking plus an alternative flight that has free seats."""
+    # Booking and alternative are chosen together: picking any disrupted
+    # booking first can land on a route with no capacity left.
     booking = await conn.fetchrow("""
-        SELECT b.pnr_code, b.assigned_seat_id, f.origin, f.destination
+        SELECT b.pnr_code, b.assigned_seat_id, o.origin, o.destination,
+               alt.flight_id AS target
         FROM pnr_bookings b
-        JOIN flights f ON f.flight_id = b.original_flight_id
+        JOIN flights o   ON o.flight_id = b.original_flight_id
+        JOIN flights alt ON alt.origin = o.origin AND alt.destination = o.destination
         WHERE b.booking_status = 'DISRUPTED'
+          AND alt.status = 'SCHEDULED' AND alt.departure_time > now()
+          AND EXISTS (SELECT 1 FROM seats s
+                      WHERE s.flight_id = alt.flight_id AND s.status = 'AVAILABLE')
+        ORDER BY alt.departure_time
         LIMIT 1
     """)
     if booking is None:
-        pytest.skip("No DISRUPTED bookings; run the dataset generator first.")
-
-    target = await conn.fetchval("""
-        SELECT f.flight_id FROM flights f
-        WHERE f.origin = $1 AND f.destination = $2
-          AND f.status = 'SCHEDULED' AND f.departure_time > now()
-          AND EXISTS (SELECT 1 FROM seats s
-                      WHERE s.flight_id = f.flight_id AND s.status = 'AVAILABLE')
-        ORDER BY f.departure_time LIMIT 1
-    """, booking["origin"], booking["destination"])
-    if target is None:
-        pytest.skip("No alternative flight with free seats on that route.")
+        pytest.skip(
+            "No disrupted passenger with an alternative flight; the demo data is "
+            "stale. Run: python scripts/reset_demo.py"
+        )
+    target = booking["target"]
 
     return booking, target
 
@@ -64,7 +63,9 @@ async def test_reaccommodation_assigns_a_seat(conn, disrupted):
     booking, target = disrupted
     row = await conn.fetchrow(
         "SELECT * FROM reaccommodate_passenger_atomic($1, $2, $3)",
-        booking["pnr_code"], target, "PYTEST",
+        booking["pnr_code"],
+        target,
+        "PYTEST",
     )
     assert row["success"] is True
     assert row["assigned_seat_number"]
@@ -75,11 +76,15 @@ async def test_repeat_call_is_refused(conn, disrupted):
     booking, target = disrupted
     await conn.fetchrow(
         "SELECT * FROM reaccommodate_passenger_atomic($1, $2, $3)",
-        booking["pnr_code"], target, "PYTEST",
+        booking["pnr_code"],
+        target,
+        "PYTEST",
     )
     second = await conn.fetchrow(
         "SELECT * FROM reaccommodate_passenger_atomic($1, $2, $3)",
-        booking["pnr_code"], target, "PYTEST",
+        booking["pnr_code"],
+        target,
+        "PYTEST",
     )
     assert second["success"] is False
 
@@ -93,11 +98,11 @@ async def test_previous_seat_is_released(conn, disrupted):
 
     await conn.fetchrow(
         "SELECT * FROM reaccommodate_passenger_atomic($1, $2, $3)",
-        booking["pnr_code"], target, "PYTEST",
+        booking["pnr_code"],
+        target,
+        "PYTEST",
     )
-    status = await conn.fetchval(
-        "SELECT status::text FROM seats WHERE seat_id = $1", old_seat
-    )
+    status = await conn.fetchval("SELECT status::text FROM seats WHERE seat_id = $1", old_seat)
     assert status == "AVAILABLE"
 
 
@@ -108,7 +113,9 @@ async def test_unknown_pnr_is_rejected_and_audited(conn, disrupted):
 
     row = await conn.fetchrow(
         "SELECT * FROM reaccommodate_passenger_atomic($1, $2, $3)",
-        "ZZZZZZ", target, "PYTEST",
+        "ZZZZZZ",
+        target,
+        "PYTEST",
     )
     assert row["success"] is False
 
@@ -127,7 +134,9 @@ async def test_cancelled_target_flight_is_rejected(conn, disrupted):
 
     row = await conn.fetchrow(
         "SELECT * FROM reaccommodate_passenger_atomic($1, $2, $3)",
-        booking["pnr_code"], cancelled, "PYTEST",
+        booking["pnr_code"],
+        cancelled,
+        "PYTEST",
     )
     assert row["success"] is False
 

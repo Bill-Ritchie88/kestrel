@@ -2,6 +2,24 @@
 
 Prepared 24 September 2026. Covers the six items in the weekly progress brief.
 
+> **Paths below are as of 24 September.** On 1 October 2026 the project moved
+> out of the coursework repository into its own repository, and files were
+> renamed. The record below is left as written; translate paths with this table.
+> See [2026-10-01-standalone-repository.md](2026-10-01-standalone-repository.md).
+>
+> | 24 September | Now |
+> |---|---|
+> | `Project Kestrel/project/` | repository root |
+> | `main.py`, `auth.py` | `src/kestrel/api/main.py`, `src/kestrel/api/auth.py` |
+> | `agent.py` | `src/kestrel/agent.py` |
+> | `database.py` | `scripts/smoke_test.py` |
+> | `sql/000_base_schema.sql` | `db/migrations/000_base_schema.sql` |
+> | `sql/baseline_reaccommodate_passenger_atomic.sql` | `db/migrations/001_baseline_reaccommodate_passenger_atomic.sql` |
+> | `sql/schema.sql` | `db/migrations/002_indexes_and_rls.sql` |
+> | `sql/reaccommodate_passenger_atomic_v2.sql` | `db/migrations/003_reaccommodate_passenger_atomic_v2.sql` |
+> | `sql/Reset_demo_state.sql` | `db/seeds/reset_demo_state.sql`, run with `scripts/reset_demo.py` |
+> | `claude/dataset-generator-v2.md` (notebook) | `scripts/dataset_generator.py` |
+
 ---
 
 ## The one-line framing

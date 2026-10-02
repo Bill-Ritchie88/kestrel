@@ -9,9 +9,10 @@ Nothing is hardcoded. The previous version of this file carried a PNR
 ("KQX89A") and a flight UUID from an early seed; both vanish the moment the
 dataset is regenerated, so the script reported a failure that was an artefact
 of its own stale constants rather than a defect in the procedure. Every
-identifier below is discovered at runtime.
+identifier below is discovered at runtime, and if the demo data has gone
+stale it is reset first (see reset_demo.py).
 
-    python database.py
+    python scripts/smoke_test.py
 """
 
 import asyncio
@@ -22,32 +23,10 @@ from pathlib import Path
 import asyncpg
 from dotenv import load_dotenv
 
-load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
+from reset_demo import ensure_fresh
+
+load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
 DATABASE_URL = os.getenv("DATABASE_URL")
-
-
-FIND_DISRUPTED = """
-    SELECT b.pnr_code, p.last_name, f.origin, f.destination
-    FROM pnr_bookings b
-    JOIN passengers p ON p.passenger_id = b.passenger_id
-    JOIN flights    f ON f.flight_id    = b.original_flight_id
-    WHERE b.booking_status = 'DISRUPTED'
-    LIMIT 1
-"""
-
-FIND_ALTERNATIVE = """
-    SELECT f.flight_id, f.flight_number, f.departure_time
-    FROM flights f
-    WHERE f.origin = $1 AND f.destination = $2
-      AND f.status = 'SCHEDULED'
-      AND f.departure_time > now()
-      AND EXISTS (
-          SELECT 1 FROM seats s
-          WHERE s.flight_id = f.flight_id AND s.status = 'AVAILABLE'
-      )
-    ORDER BY f.departure_time
-    LIMIT 1
-"""
 
 
 class _Rollback(Exception):
@@ -70,29 +49,18 @@ async def main() -> int:
             version = await conn.fetchval("SELECT version()")
             print(f"[OK]   {version.split(',')[0]}")
 
-            booking = await conn.fetchrow(FIND_DISRUPTED)
-            if booking is None:
-                print("[ERROR] No DISRUPTED bookings found.")
-                print("        Run scripts/dataset_generator.py, or "
-                      "sql/Reset_demo_state.sql to recreate the disruption.")
-                return 1
-
-            print(f"[OK]   Disrupted booking {booking['pnr_code']} "
-                  f"({booking['last_name']}) on "
-                  f"{booking['origin']}-{booking['destination']}")
-
-            target = await conn.fetchrow(
-                FIND_ALTERNATIVE, booking["origin"], booking["destination"]
+            # Picks a disrupted passenger together with a flight that has room,
+            # resetting the demo data first if it has gone stale.
+            booking = await ensure_fresh(conn)
+            print(
+                f"[OK]   Disrupted booking {booking['pnr_code']} "
+                f"({booking['last_name']}) on "
+                f"{booking['origin']}-{booking['destination']}"
             )
-            if target is None:
-                print("[ERROR] No alternative flight with free seats on "
-                      f"{booking['origin']}-{booking['destination']}.")
-                print("        Increase --days or lower --load-factor when "
-                      "generating the dataset.")
-                return 1
-
-            print(f"[OK]   Alternative {target['flight_number']} departs "
-                  f"{target['departure_time']:%d %b %H:%M}")
+            print(
+                f"[OK]   Alternative {booking['flight_number']} departs "
+                f"{booking['departure_time']:%d %b %H:%M}"
+            )
 
             # Everything below runs inside a transaction that is always rolled
             # back, so running this script never changes the demo state.
@@ -100,27 +68,32 @@ async def main() -> int:
                 async with conn.transaction():
                     first = await conn.fetchrow(
                         "SELECT * FROM reaccommodate_passenger_atomic($1, $2, $3)",
-                        booking["pnr_code"], target["flight_id"], "SMOKE_TEST",
+                        booking["pnr_code"],
+                        booking["flight_id"],
+                        "SMOKE_TEST",
                     )
-                    print(f"\n  1st call  success={first['success']}  "
-                          f"seat={first['assigned_seat_number']}  "
-                          f"{first['message']}")
+                    print(
+                        f"\n  1st call  success={first['success']}  "
+                        f"seat={first['assigned_seat_number']}  "
+                        f"{first['message']}"
+                    )
 
                     # The idempotency guard added in migration 003: a repeat
                     # call must be refused rather than consume a second seat.
                     second = await conn.fetchrow(
                         "SELECT * FROM reaccommodate_passenger_atomic($1, $2, $3)",
-                        booking["pnr_code"], target["flight_id"], "SMOKE_TEST",
+                        booking["pnr_code"],
+                        booking["flight_id"],
+                        "SMOKE_TEST",
                     )
-                    print(f"  2nd call  success={second['success']}  "
-                          f"{second['message']}")
+                    print(f"  2nd call  success={second['success']}  {second['message']}")
 
                     ok = bool(first["success"]) and not second["success"]
                     raise _Rollback
             except _Rollback:
                 print("\n[INFO] Transaction rolled back; demo state unchanged.")
 
-    except (asyncpg.PostgresError, OSError) as exc:
+    except (asyncpg.PostgresError, OSError, RuntimeError) as exc:
         print(f"[ERROR] {type(exc).__name__}: {exc}")
         return 1
     finally:

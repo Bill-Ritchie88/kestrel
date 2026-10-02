@@ -12,11 +12,16 @@ Exit code 0 clean, 1 if anything is found.
 """
 
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# Resolved to an absolute path so the scan cannot be hijacked by a "git"
+# earlier on PATH (ruff S607).
+GIT = shutil.which("git") or sys.exit("[ERROR] git is not on PATH.")
 
 # Patterns that must never appear in a tracked file.
 PATTERNS = {
@@ -31,14 +36,28 @@ PATTERNS = {
 ALLOWLIST = {".env.example", "check_secrets.py", "README.md"}
 
 TEXT_SUFFIXES = {
-    ".py", ".sql", ".md", ".txt", ".yml", ".yaml", ".json", ".toml",
-    ".ini", ".cfg", ".env", ".example", ".ipynb", ".sh", ".ps1", "",
+    ".py",
+    ".sql",
+    ".md",
+    ".txt",
+    ".yml",
+    ".yaml",
+    ".json",
+    ".toml",
+    ".ini",
+    ".cfg",
+    ".env",
+    ".example",
+    ".ipynb",
+    ".sh",
+    ".ps1",
+    "",
 }
 
 
 def tracked_files() -> list[str]:
-    out = subprocess.run(
-        ["git", "ls-files"], cwd=REPO_ROOT, capture_output=True, text=True, check=True
+    out = subprocess.run(  # noqa: S603 - fixed argv, no user input
+        [GIT, "ls-files"], cwd=REPO_ROOT, capture_output=True, text=True, check=True
     )
     return out.stdout.splitlines()
 

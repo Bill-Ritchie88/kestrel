@@ -5,13 +5,13 @@ is cancelled, a passenger authenticates with their PNR and surname, asks
 questions in natural language, and is rebooked onto an alternative flight with
 a seat assigned atomically.
 
-The design pairs a **non-deterministic LLM** with a **deterministic transaction
-layer**. The agent decides *what* to do; a PL/pgSQL stored procedure decides
-*whether it is allowed* and performs it under row-level locks. The agent has no
+The design pairs a non-deterministic LLM with a deterministic transaction
+layer. The agent decides what to do; a PL/pgSQL stored procedure decides
+whether it is allowed and performs it under row-level locks. The agent has no
 database credentials and cannot write to the database except through the REST
 tier.
 
-> Undergraduate capstone project. No real passenger data is used at any point;
+>  No real passenger data is used at any point;
 > the entire dataset is synthetic.
 
 ---
@@ -20,20 +20,21 @@ tier.
 
 ```
 Flutter client  ->  FastAPI REST tier  ->  PostgreSQL (Supabase)
-  (Sprint 3)          main.py               reaccommodate_passenger_atomic
-                      auth.py               row-level locks, audit_logs
+  (Sprint 3)          kestrel.api.main      reaccommodate_passenger_atomic
+                      kestrel.api.auth      row-level locks, audit_logs
                          ^
                          |  HTTP only, no DB credentials
                    Agent tier
-                   agent.py  ->  Gemini (LangChain, bounded tool loop)
+                   kestrel.agent  ->  Gemini (LangChain, bounded tool loop)
 ```
 
 | Tier | File | Responsibility |
 |---|---|---|
-| REST | `main.py` | Endpoints, request validation, connection pool |
-| Auth | `auth.py` | PNR + surname login, HMAC session tokens, login throttling |
-| Agent | `agent.py` | Bounded tool-calling loop; three tools, no DB access |
-| Data | `sql/` | Base schema, the stored procedure and its corrections |
+| REST | `src/kestrel/api/main.py` | Endpoints, request validation, connection pool |
+| Auth | `src/kestrel/api/auth.py` | PNR + surname login, HMAC session tokens, login throttling |
+| Agent | `src/kestrel/agent.py` | Bounded tool-calling loop; three tools, no DB access |
+| Config | `src/kestrel/config.py` | Loads `.env` once, before any module reads the environment |
+| Data | `db/` | Numbered migrations and the demo reset script |
 | Test data | `scripts/dataset_generator.py` | Synthetic network, passengers, bookings, disruption |
 
 ---
@@ -43,13 +44,13 @@ Flutter client  ->  FastAPI REST tier  ->  PostgreSQL (Supabase)
 Requires **Python 3.13** and a Supabase project.
 
 ```bash
-cd "Project Kestrel/project"
+git clone <repo-url> kestrel && cd kestrel
 
 # 1. Virtual environment and dependencies
 python -m venv .venv
 .venv\Scripts\activate          # Windows
 # source .venv/bin/activate      # macOS / Linux
-pip install -r requirements.txt -r requirements-dev.txt
+pip install -r requirements-dev.txt -e .
 
 # 2. Configuration
 copy .env.example .env           # cp on macOS / Linux
@@ -73,11 +74,11 @@ list. `.env` is ignored by Git and must never be committed.
 
 | Variable | Used by | Notes |
 |---|---|---|
-| `DATABASE_URL` | `main.py`, `database.py`, `scripts/` | Supabase **session pooler**, port 5432. Port 6543 is the transaction pooler and cannot run `COPY`. |
-| `GOOGLE_API_KEY` | `agent.py` | Falls back to `GEMINI_API_KEY`. |
-| `SESSION_SECRET` | `auth.py` | Signs bearer tokens. If unset the API still starts but every token is invalidated on restart, and it prints a `[WARN]`. |
-| `FASTAPI_BASE_URL` | `agent.py` | Where the agent's tools send HTTP requests. |
-| `ALLOWED_ORIGINS` | `main.py` | Comma-separated CORS allow-list. |
+| `DATABASE_URL` | `kestrel.api.main`, `scripts/` | Supabase **session pooler**, port 5432. Port 6543 is the transaction pooler and cannot run `COPY`. |
+| `GOOGLE_API_KEY` | `kestrel.agent` | Falls back to `GEMINI_API_KEY`. |
+| `SESSION_SECRET` | `kestrel.api.auth` | Signs bearer tokens. If unset the API still starts but every token is invalidated on restart, and it prints a `[WARN]`. |
+| `FASTAPI_BASE_URL` | `kestrel.agent` | Where the agent's tools send HTTP requests. |
+| `ALLOWED_ORIGINS` | `kestrel.api.main` | Comma-separated CORS allow-list. |
 
 ---
 
@@ -87,14 +88,14 @@ Apply the migrations **in this order** in the Supabase SQL editor:
 
 | # | File | Contents |
 |---|---|---|
-| 000 | `sql/000_base_schema.sql` | Tables and enum types. Generate with `python scripts/export_schema.py`. |
-| 001 | `sql/baseline_reaccommodate_passenger_atomic.sql` | The procedure as first deployed. Kept unchanged as an auditable baseline. |
-| 002 | `sql/schema.sql` | Indexes for auth, seat claiming and alternative search; row-level security. |
-| 003 | `sql/reaccommodate_passenger_atomic_v2.sql` | The corrected procedure. |
-| 004 | `sql/Reset_demo_state.sql` | Repeatable reset to a known disrupted state. |
+| 000 | `db/migrations/000_base_schema.sql` | Tables and enum types. Generate with `python scripts/export_schema.py`. |
+| 001 | `db/migrations/001_baseline_reaccommodate_passenger_atomic.sql` | The procedure as first deployed. Kept unchanged as an auditable baseline. |
+| 002 | `db/migrations/002_indexes_and_rls.sql` | Indexes for auth, seat claiming and alternative search; row-level security. |
+| 003 | `db/migrations/003_reaccommodate_passenger_atomic_v2.sql` | The corrected procedure. |
+| — | `db/seeds/reset_demo_state.sql` | Repeatable reset to a known disrupted state. Not a migration; run with `make reset`. |
 
 Migration 003 corrects five defects in 001, each covered by a test in
-`tests/test_reaccommodation_integration.py`:
+`tests/integration/test_reaccommodation.py`:
 
 1. The passenger's previous seat was never released back to `AVAILABLE`.
 2. The target flight was never validated for existence, status or departure time.
@@ -112,18 +113,27 @@ Produces roughly 1,020 flights, 171,500 seats, 141,600 bookings and 75,500
 passengers, then cancels the three busiest future flights. `--days 3` gives a
 smaller dataset. `--dry-run` prints the shape without touching the database.
 
-**Between test runs**, do not regenerate — run `sql/Reset_demo_state.sql`
-instead. It reschedules flights relative to `now()`, frees seats, restores
-bookings and re-creates the disruption, and it preserves `audit_logs`.
+**Between test runs**, do not regenerate — run `make reset`
+(`python scripts/reset_demo.py`) instead. It applies
+`db/seeds/reset_demo_state.sql`, which reschedules flights relative to `now()`,
+frees seats, restores bookings and re-creates the disruption, and it preserves
+`audit_logs`.
+
+The schedule only covers the generator's `--days` window, so the demo data goes
+stale once that window has passed (and is used up as passengers are rebooked).
+You rarely need to reset by hand: `make smoke`, `make agent` and `make test-all`
+check first and reset automatically when no disrupted passenger has a usable
+alternative flight (`reset_demo.py --if-stale`).
 
 ---
 
 ## Running
 
 ```bash
-make api        # uvicorn main:app --reload    -> http://127.0.0.1:8000/docs
+make api        # uvicorn kestrel.api.main:app --reload  -> http://127.0.0.1:8000/docs
 make smoke      # verify the DB and the stored procedure end to end
-make agent      # run the agent against the running API
+make agent      # run the agent for a disrupted passenger (needs `make api` running)
+make reset      # reset the demo data to now
 ```
 
 `/health` should report `status: online` and `database: connected`.
@@ -132,13 +142,18 @@ make agent      # run the agent against the running API
 calls the procedure twice to demonstrate the idempotency guard, and rolls the
 transaction back so the demonstration state is unchanged.
 
+`make agent` runs `scripts/agent_demo.py`, which picks a disrupted passenger
+from the database and hands the PNR and surname to the agent. The agent has no
+database access, so it cannot look one up itself. To run it for a specific
+passenger: `python -m kestrel.agent --pnr IZNXXV --last-name Cowan`.
+
 ---
 
 ## Development
 
 ```bash
 make test       # unit tests, no database required
-make test-all   # adds integration tests (needs DATABASE_URL)
+make test-all   # adds integration tests (needs DATABASE_URL; resets stale demo data)
 make lint       # ruff
 make fmt        # ruff --fix and format
 make lock       # pin exact versions into requirements.lock.txt
@@ -154,7 +169,7 @@ Integration tests run inside a transaction that is always rolled back.
 | Where | What |
 |---|---|
 | `.pre-commit-config.yaml` | ruff, line-ending and large-file checks, private-key detection, and the project secret scan — before each commit |
-| `.github/workflows/ci.yml` | Secret scan, lint and tests on every push and pull request touching the project |
+| `.github/workflows/ci.yml` | Secret scan, lint and tests on every push and pull request |
 | `scripts/check_secrets.py` | Fails if a `.env` is tracked, a `.gitignore` is UTF-16, or any tracked file contains a credential |
 
 The secret scan exists because of a real incident: the project `.gitignore`
@@ -168,23 +183,39 @@ mistake fail the build.
 ## Repository layout
 
 ```
-Project Kestrel/project/
-├── main.py                  REST tier
-├── auth.py                  Session authentication and throttling
-├── agent.py                 Bounded tool-calling agent
-├── database.py              Database and stored-procedure smoke test
-├── requirements.txt         Direct dependencies (floors)
-├── requirements-dev.txt     Test and lint dependencies
-├── pyproject.toml           ruff and pytest configuration
-├── Makefile / tasks.ps1     Task runner (make / PowerShell)
-├── .env.example             Configuration template
+kestrel/
+├── src/kestrel/                  Application package (pip install -e .)
+│   ├── config.py                 Loads .env once, before anything reads it
+│   ├── agent.py                  Bounded tool-calling agent   (python -m kestrel.agent)
+│   └── api/
+│       ├── main.py               REST tier                    (uvicorn kestrel.api.main:app)
+│       └── auth.py               Session authentication and throttling
+├── db/
+│   ├── migrations/               000-003, applied in order
+│   └── seeds/reset_demo_state.sql
 ├── scripts/
-│   ├── dataset_generator.py Synthetic dataset
-│   ├── export_schema.py     Dump the live base schema as migration 000
-│   └── check_secrets.py     Credential guard used by CI and pre-commit
-├── sql/                     Migrations 000-004
-└── tests/                   Unit and integration tests
+│   ├── dataset_generator.py      Synthetic dataset
+│   ├── export_schema.py          Dump the live base schema as migration 000
+│   ├── smoke_test.py             Database and stored-procedure smoke test
+│   ├── reset_demo.py             Reset demo data to now (--if-stale: only when needed)
+│   ├── agent_demo.py             Run the agent for a disrupted passenger
+│   └── check_secrets.py          Credential guard used by CI and pre-commit
+├── tests/
+│   ├── unit/                     No database needed
+│   └── integration/              Need DATABASE_URL; skipped without it
+├── docs/
+│   ├── sprints/                  Dated sprint and change records
+│   └── proposals/                Proposed work awaiting approval
+├── .github/workflows/ci.yml      Secret scan, lint, tests
+├── pyproject.toml                Package metadata, ruff and pytest configuration
+├── requirements.txt              Runtime dependencies (floors)
+├── requirements-dev.txt          Test and lint dependencies
+├── Makefile / tasks.ps1          Task runner (make / PowerShell)
+└── .env.example                  Configuration template
 ```
+
+The project report (`.docx` / `.pdf`) is not kept in this repository; it lives
+in `OneDrive/Documents/Project Kestrel/report/`.
 
 ---
 
@@ -208,5 +239,5 @@ Project Kestrel/project/
   passenger can be given a business seat. Fix 5, scheduled for Sprint 2.
 - Login throttling is per-process and in-memory; it will not hold across
   multiple workers.
-- `sql/000_base_schema.sql` must be generated and committed before the
+- `db/migrations/000_base_schema.sql` must be generated and committed before the
   repository can rebuild the database from nothing.

@@ -24,6 +24,8 @@ from dataclasses import dataclass
 
 from fastapi import Header, HTTPException, status
 
+from kestrel import config  # noqa: F401  - loads .env before anything reads it
+
 # ---------------------------------------------------------------------------
 # Signing secret.
 #
@@ -59,9 +61,7 @@ def _b64url_decode(data: str) -> bytes:
 
 
 def _sign(payload_b64: str) -> str:
-    digest = hmac.new(
-        SESSION_SECRET.encode(), payload_b64.encode(), hashlib.sha256
-    ).digest()
+    digest = hmac.new(SESSION_SECRET.encode(), payload_b64.encode(), hashlib.sha256).digest()
     return _b64url_encode(digest)
 
 
@@ -103,7 +103,7 @@ def _decode_token(token: str) -> PassengerSession:
     try:
         payload_b64, signature = token.split(".", 1)
     except ValueError:
-        raise ValueError("Malformed token.")
+        raise ValueError("Malformed token.") from None
 
     if not hmac.compare_digest(signature, _sign(payload_b64)):
         raise ValueError("Invalid token signature.")
@@ -111,7 +111,7 @@ def _decode_token(token: str) -> PassengerSession:
     try:
         payload = json.loads(_b64url_decode(payload_b64))
     except (ValueError, UnicodeDecodeError):
-        raise ValueError("Malformed token payload.")
+        raise ValueError("Malformed token payload.") from None
 
     if payload.get("exp", 0) < time.time():
         raise ValueError("Token has expired.")
@@ -148,7 +148,7 @@ async def current_passenger(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(exc),
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from exc
 
 
 # ---------------------------------------------------------------------------

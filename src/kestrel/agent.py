@@ -7,16 +7,16 @@ passenger obtained by authenticating. This is the boundary that keeps a
 nondeterministic language model from mutating transactional state directly.
 """
 
+import argparse
 import os
 from contextvars import ContextVar
 
 import httpx
-from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-load_dotenv()
+from kestrel import config  # noqa: F401  - loads .env before anything reads it
 
 FASTAPI_BASE_URL = os.getenv("FASTAPI_BASE_URL", "http://127.0.0.1:8000")
 MAX_TOOL_ITERATIONS = 5
@@ -110,9 +110,7 @@ def reaccommodate_passenger_tool(target_flight_id: str) -> str:
         )
         data = response.json()
         if response.status_code == 200:
-            return (
-                f"SUCCESS: Seat {data['assigned_seat']} assigned. {data['message']}"
-            )
+            return f"SUCCESS: Seat {data['assigned_seat']} assigned. {data['message']}"
         return f"FAILED: {data.get('detail', 'Unknown error')}"
     except Exception as exc:
         return f"ERROR: Could not reach backend server. Detail: {exc}"
@@ -121,9 +119,7 @@ def reaccommodate_passenger_tool(target_flight_id: str) -> str:
 tools = [find_alternative_flights_tool, reaccommodate_passenger_tool]
 tools_by_name = {t.name: t for t in tools}
 
-llm = ChatGoogleGenerativeAI(
-    model="gemini-flash-latest", temperature=0, api_key=gemini_api_key
-)
+llm = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0, api_key=gemini_api_key)
 llm_with_tools = llm.bind_tools(tools)
 
 SYSTEM_PROMPT = (
@@ -165,9 +161,7 @@ def run_agent(user_query: str) -> str:
 
             print(f"\n[TOOL CALL] {tool_call['name']} args={tool_call['args']}")
             print(f"[TOOL RESULT] {output}\n")
-            messages.append(
-                ToolMessage(content=str(output), tool_call_id=tool_call["id"])
-            )
+            messages.append(ToolMessage(content=str(output), tool_call_id=tool_call["id"]))
 
     return (
         "I was unable to complete this automatically. Transferring you to a "
@@ -177,20 +171,33 @@ def run_agent(user_query: str) -> str:
 
 def _extract_text(msg: AIMessage) -> str:
     if isinstance(msg.content, list):
-        return "".join(
-            block.get("text", "") for block in msg.content if isinstance(block, dict)
-        )
+        return "".join(block.get("text", "") for block in msg.content if isinstance(block, dict))
     return str(msg.content)
 
 
-if __name__ == "__main__":
+DEFAULT_PROMPT = "My flight was cancelled. Please get me on the next available flight."
+
+
+def main(argv: list[str] | None = None) -> None:
+    # The passenger is supplied by the caller rather than hardcoded: a fixed PNR
+    # vanishes the moment the dataset is regenerated or reset. The agent has no
+    # database access to look one up itself, by design - scripts/agent_demo.py
+    # finds a disrupted passenger and calls main() with it.
+    parser = argparse.ArgumentParser(description="Run the Kestrel agent for one passenger.")
+    parser.add_argument("--pnr", required=True, help="Booking reference, e.g. IZNXXV")
+    parser.add_argument("--last-name", required=True, help="Passenger surname on the booking")
+    parser.add_argument("--prompt", default=DEFAULT_PROMPT, help="What the passenger asks")
+    args = parser.parse_args(argv)
+
     print("\n--- Project Kestrel AI Agent Online ---")
 
-    passenger = authenticate(pnr_code="KQX89A", last_name="Otieno")
+    passenger = authenticate(pnr_code=args.pnr, last_name=args.last_name)
     print(f"Authenticated: {passenger['last_name']} ({passenger['rewards_tier']})")
-
-    prompt = "My flight was cancelled. Please get me on the next available flight."
-    print(f"User Request: {prompt}")
+    print(f"User Request: {args.prompt}")
 
     print("--- Final Agent Response ---")
-    print(run_agent(prompt))
+    print(run_agent(args.prompt))
+
+
+if __name__ == "__main__":
+    main()

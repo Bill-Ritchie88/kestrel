@@ -1,10 +1,10 @@
 """
-Export the deployed base schema into sql/000_base_schema.sql.
+Export the deployed base schema into db/migrations/000_base_schema.sql.
 
 Chapter 5 records that "the base table definitions exist only in the hosted
 database and must be exported into the repository as migration 0". Until they
 are, the repository cannot be used to rebuild the database from scratch, so
-nobody else can reproduce the results - the migrations in sql/ all assume the
+nobody else can reproduce the results - the migrations in db/migrations/ all assume the
 tables already exist.
 
 This reads the live catalogue and writes the DDL, so migration 0 is generated
@@ -12,7 +12,7 @@ from the real schema rather than transcribed by hand from the ERD, which is
 how the ERD and the deployment drifted apart in the first place.
 
     python scripts/export_schema.py
-    python scripts/export_schema.py --out sql/000_base_schema.sql
+    python scripts/export_schema.py --out db/migrations/000_base_schema.sql
 
 Requires DATABASE_URL. Writes a file; changes nothing in the database.
 """
@@ -21,7 +21,7 @@ import argparse
 import asyncio
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import asyncpg
@@ -82,14 +82,14 @@ async def build(conn) -> str:
         "-- scripts/export_schema.py. Do not hand-edit: regenerate instead, so",
         "-- this file cannot drift from the database the way the ERD did.",
         "--",
-        f"-- Generated: {datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC",
+        f"-- Generated: {datetime.now(UTC):%Y-%m-%d %H:%M} UTC",
         "--",
         "-- Apply FIRST, before the migrations in Table 5.4:",
         "--   000_base_schema.sql   <- this file",
-        "--   baseline_reaccommodate_passenger_atomic.sql",
-        "--   schema.sql",
-        "--   reaccommodate_passenger_atomic_v2.sql",
-        "--   Reset_demo_state.sql",
+        "--   001_baseline_reaccommodate_passenger_atomic.sql",
+        "--   002_indexes_and_rls.sql",
+        "--   003_reaccommodate_passenger_atomic_v2.sql",
+        "--   ../seeds/reset_demo_state.sql",
         "",
         "BEGIN;",
         "",
@@ -102,10 +102,10 @@ async def build(conn) -> str:
     for row in await conn.fetch(ENUMS_SQL):
         labels = ", ".join(f"'{lbl}'" for lbl in row["labels"])
         out += [
-            f"DO $$ BEGIN",
+            "DO $$ BEGIN",
             f"    CREATE TYPE {row['name']} AS ENUM ({labels});",
-            f"EXCEPTION WHEN duplicate_object THEN NULL;",
-            f"END $$;",
+            "EXCEPTION WHEN duplicate_object THEN NULL;",
+            "END $$;",
             "",
         ]
 
@@ -151,17 +151,18 @@ async def build(conn) -> str:
             if con["kind"] == "f":
                 out += [
                     f"ALTER TABLE {qualified} DROP CONSTRAINT IF EXISTS {con['name']};",
-                    f"ALTER TABLE {qualified} ADD CONSTRAINT {con['name']} "
-                    f"{con['definition']};",
+                    f"ALTER TABLE {qualified} ADD CONSTRAINT {con['name']} {con['definition']};",
                     "",
                 ]
 
     out += ["-- " + "-" * 73, "-- Indexes", "-- " + "-" * 73, ""]
     for table in present:
         for idx in await conn.fetch(INDEXES_SQL, table, f"public.{table}"):
-            definition = idx["definition"].replace(
-                "CREATE INDEX", "CREATE INDEX IF NOT EXISTS", 1
-            ).replace("CREATE UNIQUE INDEX", "CREATE UNIQUE INDEX IF NOT EXISTS", 1)
+            definition = (
+                idx["definition"]
+                .replace("CREATE INDEX", "CREATE INDEX IF NOT EXISTS", 1)
+                .replace("CREATE UNIQUE INDEX", "CREATE UNIQUE INDEX IF NOT EXISTS", 1)
+            )
             out.append(f"{definition};")
     out += ["", "COMMIT;", ""]
 
@@ -170,7 +171,9 @@ async def build(conn) -> str:
 
 async def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", default=str(PROJECT_ROOT / "sql" / "000_base_schema.sql"))
+    parser.add_argument(
+        "--out", default=str(PROJECT_ROOT / "db" / "migrations" / "000_base_schema.sql")
+    )
     args = parser.parse_args()
 
     url = os.getenv("DATABASE_URL")

@@ -1,27 +1,47 @@
-# Project Kestrel - see the repository-root .gitignore for the full rule set.
-# Kept as a local safety net so the rules travel with the project folder if it
-# is ever split into its own repository.
+# Project Kestrel ignores.
 #
-# MUST be UTF-8 with LF endings - Git cannot read a UTF-16 .gitignore.
+# This file MUST stay UTF-8 with LF endings. A .gitignore saved as UTF-16 (the
+# default when PowerShell's > redirection writes it on Windows) is unreadable
+# to Git, which silently ignores nothing at all. That is how a .env containing
+# live credentials was once committed. scripts/check_secrets.py enforces this.
 
+# Secrets - never commit
 .env
 .env.*
 !.env.example
 *.pem
 *.key
+*.p12
+credentials.json
+service-account*.json
 
+# Python
 __pycache__/
 *.py[cod]
+*$py.class
 .venv/
 venv/
 env/
 *.egg-info/
+build/
+dist/
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
 .coverage
 htmlcov/
 
+# Jupyter
+.ipynb_checkpoints/
+
+# Flutter / Dart (client tier)
 .dart_tool/
 .packages
-build/
 *.iml
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

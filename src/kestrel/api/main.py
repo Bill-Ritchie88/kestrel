@@ -8,15 +8,14 @@ and every endpoint that mutates booking state requires an authenticated session.
 
 import os
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 import asyncpg
-from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from auth import (
+from kestrel import config  # noqa: F401  - loads .env before anything reads it
+from kestrel.api.auth import (
     PassengerSession,
     clear_attempts,
     current_passenger,
@@ -24,9 +23,6 @@ from auth import (
     issue_token,
     register_failed_attempt,
 )
-
-env_path = Path(__file__).resolve().parent / ".env"
-load_dotenv(dotenv_path=env_path)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 db_pool: asyncpg.Pool | None = None
@@ -134,9 +130,7 @@ class ReaccommodateRequest(BaseModel):
     by reaccommodate_passenger_atomic cannot be forged by a caller.
     """
 
-    target_flight_id: str = Field(
-        ..., examples=["c2eebc99-9c0b-4ef8-bb6d-6bb9bd380a33"]
-    )
+    target_flight_id: str = Field(..., examples=["c2eebc99-9c0b-4ef8-bb6d-6bb9bd380a33"])
 
 
 # ---------------------------------------------------------------------------
@@ -170,9 +164,7 @@ async def create_session(payload: AuthRequest):
         )
 
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            SQL_AUTHENTICATE, payload.pnr_code, payload.last_name
-        )
+        row = await conn.fetchrow(SQL_AUTHENTICATE, payload.pnr_code, payload.last_name)
 
     if row is None:
         register_failed_attempt(payload.pnr_code)
@@ -245,15 +237,15 @@ async def reaccommodate_passenger(
         try:
             result = await conn.fetchrow(
                 SQL_REACCOMMODATE,
-                session.pnr_code,          # from the token, never the request body
+                session.pnr_code,  # from the token, never the request body
                 payload.target_flight_id,
-                session.audit_actor(),     # server-derived, unforgeable
+                session.audit_actor(),  # server-derived, unforgeable
             )
-        except asyncpg.DataError:
+        except asyncpg.DataError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="target_flight_id is not a valid flight identifier.",
-            )
+            ) from exc
 
     # A procedure that returns no row is a failure mode the previous version
     # crashed on with a TypeError before it could return a useful status.

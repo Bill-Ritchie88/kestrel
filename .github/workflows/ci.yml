@@ -1,20 +1,12 @@
 name: Project Kestrel CI
 
-# Runs on every push and pull request that touches the project. The repository
-# also holds other coursework, so the paths filter keeps unrelated commits from
-# triggering a Python build.
+# Runs on every push to main or a sprint branch, and on every pull request.
 
 on:
   push:
     branches: [main, "sprint-*/**"]
-    paths: ["Project Kestrel/project/**", ".github/workflows/ci.yml"]
   pull_request:
-    paths: ["Project Kestrel/project/**", ".github/workflows/ci.yml"]
   workflow_dispatch:
-
-defaults:
-  run:
-    working-directory: "Project Kestrel/project"
 
 jobs:
   secrets:
@@ -46,7 +38,7 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: pip install -r requirements-dev.txt -e .
       # No DATABASE_URL is configured, so tests marked `integration` skip
       # themselves. The unit suite must pass without any credentials.
       - run: pytest -v

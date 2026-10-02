@@ -7,17 +7,17 @@ is why this is done at module scope rather than in a fixture.
 """
 
 import os
-import sys
-from pathlib import Path
 
 import pytest
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
 
 # A fixed secret makes token tests deterministic and stops auth.py from
 # printing its "using a random secret" warning during the run.
 os.environ.setdefault("SESSION_SECRET", "test-secret-not-used-anywhere-real")
+
+# Load .env now, so whether integration tests run depends only on whether a
+# DATABASE_URL is configured - not on which other test modules happened to
+# import kestrel first. Values already in the environment (above) still win.
+import kestrel.config  # noqa: E402, F401
 
 
 def pytest_collection_modifyitems(config, items):

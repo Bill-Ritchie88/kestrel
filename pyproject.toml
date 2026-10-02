@@ -1,12 +1,32 @@
-# Project Kestrel - tool configuration.
+# Project Kestrel - package manifest and tool configuration.
 #
-# Not a packaging manifest: the project runs from the folder rather than being
-# installed. This file exists so linting and test settings are declared once
-# and are identical on the workstation and in CI.
+# The application lives in src/kestrel and is installed in editable mode
+# (pip install -e .), so `import kestrel` works from anywhere and a stray file
+# at the repository root can never shadow a real module. Lint and test settings
+# are declared once here so they are identical on the workstation and in CI.
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kestrel"
+description = "Agentic passenger re-accommodation with a deterministic transaction layer"
+readme = "README.md"
+requires-python = ">=3.13"
+dynamic = ["version", "dependencies"]
+
+[tool.setuptools.dynamic]
+version = { attr = "kestrel.__version__" }
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py313"
+src = ["src", "tests", "scripts"]
 exclude = ["__pycache__", ".venv", "venv"]
 
 [tool.ruff.lint]
@@ -28,7 +48,7 @@ ignore = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = ["src"]
 asyncio_mode = "auto"
 markers = [
     "integration: requires a live DATABASE_URL; skipped when it is unset",
