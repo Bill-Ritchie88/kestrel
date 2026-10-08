@@ -65,7 +65,8 @@ Environments:
 |---|---|---|---|---|
 | UT-01 | Unit tests in the development sandbox (no database, no network) | All pass | 110 passed | Pass |
 | IT-01 | `tasks.ps1 test-all` on the workstation: unit + integration against Supabase (rolled back), 9 Oct 2026 | All pass | **121 passed, 1 failed** in 67 s. Failed: `test_handoff_case_round_trip` - `AmbiguousParameterError: inconsistent types deduced for parameter $1 (text versus character varying)` | **Defect in production code**, not the test: the hand-off INSERT used the PNR parameter both as a SELECT output (inferred `text`) and in a comparison with a `varchar` column. Every hand-off (passenger request, low similarity, step limit, no alternatives) would have failed at runtime. The unit tests could not see it because they use a fake connection. Fixed by casting every parameter in `handoff.py`; reproduced and verified with `PREPARE` on the rebuilt schema |
-| IT-02 | Regression guard added: every `SQL_*` statement in the REST tier (20) is prepared against the live schema | All 20 prepare | 20 prepare cleanly on the rebuilt schema (local) | Pass locally; to be confirmed on the workstation in the next `test-all` |
+| IT-02 | Regression guard added: every `SQL_*` statement in the REST tier (20) is prepared against the live schema | All 20 prepare | 20 prepare cleanly on the rebuilt schema (local) | Pass locally; confirmed on the workstation in IT-03 |
+| IT-03 | `tasks.ps1 test-all` after the hand-off fix and the latency/local-time changes, 9 Oct 2026 | All pass | **146 passed** in 96.6 s (114 unit, 12 integration, 20 statement-preparation) | **Pass** |
 
 Passing integration tests in IT-01 that cover Sprint 2 work: cabin class
 preserved on rebooking (Fix 5), confirmed booking refused and audited,
@@ -88,7 +89,6 @@ all live; results checked afterwards in the database. 9 Oct 2026, ~01:00.
 
 ## Pending in this sprint
 
-- Re-run `tasks.ps1 test-all` after the hand-off fix (expect 142 passed).
 - Re-measure agent response time after the latency changes (E2E-04).
 - Retrieval evaluation and tau calibration on the labelled question set.
 - Flutter client acceptance runs.
