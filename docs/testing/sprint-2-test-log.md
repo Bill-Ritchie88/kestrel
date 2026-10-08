@@ -59,15 +59,23 @@ Environments:
 |---|---|---|---|---|
 | LT-01 | `tasks.ps1 loadtest`: 12 business passengers from cancelled KQ886 rebook simultaneously onto the alternative with the fewest free business seats, each in its own transaction held open until all finish (rolled back) | No seat held twice; successes <= free seats; p95 < 2 s | KQ886 alternative with **1** free business seat: **1** succeeded, **11** refused ("No business seats remaining on the target flight."); **0** duplicate seats; p50 422 ms, **p95 430 ms**, max 438 ms | **Pass** |
 
-## 5. Automated suite (offline)
+## 5. Automated suite
 
-| ID | Test | Expected | Actual | Result |
+| ID | Test | Expected | Actual | Result / correction |
 |---|---|---|---|---|
 | UT-01 | Unit tests in the development sandbox (no database, no network) | All pass | 110 passed | Pass |
+| IT-01 | `tasks.ps1 test-all` on the workstation: unit + integration against Supabase (rolled back), 9 Oct 2026 | All pass | **121 passed, 1 failed** in 67 s. Failed: `test_handoff_case_round_trip` - `AmbiguousParameterError: inconsistent types deduced for parameter $1 (text versus character varying)` | **Defect in production code**, not the test: the hand-off INSERT used the PNR parameter both as a SELECT output (inferred `text`) and in a comparison with a `varchar` column. Every hand-off (passenger request, low similarity, step limit, no alternatives) would have failed at runtime. The unit tests could not see it because they use a fake connection. Fixed by casting every parameter in `handoff.py`; reproduced and verified with `PREPARE` on the rebuilt schema |
+| IT-02 | Regression guard added: every `SQL_*` statement in the REST tier (20) is prepared against the live schema | All 20 prepare | 20 prepare cleanly on the rebuilt schema (local) | Pass locally; to be confirmed on the workstation in the next `test-all` |
+
+Passing integration tests in IT-01 that cover Sprint 2 work: cabin class
+preserved on rebooking (Fix 5), confirmed booking refused and audited,
+cancelled-target rejection audited, vouchers written once per type with stable
+codes and an `ENTITLEMENTS_ISSUED` audit row, and policy-store ordering on the
+120 ingested clauses.
 
 ## Pending in this sprint
 
-- `tasks.ps1 test-all` on the workstation (unit + integration against Supabase).
+- Re-run `tasks.ps1 test-all` after the hand-off fix (expect 142 passed).
 - End-to-end agent runs for PNR A27Z99 (business, GOLD, KQ886 TECHNICAL):
   entitlements question, rebooking, out-of-scope question.
 - Retrieval evaluation and tau calibration on the labelled question set.

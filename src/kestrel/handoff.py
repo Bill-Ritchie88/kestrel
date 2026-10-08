@@ -32,21 +32,27 @@ SQL_FIND_OPEN = f"""
     ORDER BY created_at DESC LIMIT 1;
 """
 
+# Every parameter is cast explicitly. Postgres infers a parameter's type from
+# where it is used; the first version used the PNR both as a SELECT output
+# (inferred text) and in a comparison with a varchar column, and the server
+# refused it ("inconsistent types deduced for parameter $1"). The unit tests,
+# which use a fake connection, could not see this; the integration test did.
 SQL_UPDATE_OPEN = f"""
     UPDATE handoff_cases
-    SET question = COALESCE($2, question),
-        top_similarity = COALESCE($3, top_similarity),
+    SET question = COALESCE($2::text, question),
+        top_similarity = COALESCE($3::double precision, top_similarity),
         similarity_scores = COALESCE($4::jsonb, similarity_scores),
-        summary = COALESCE($5, summary)
-    WHERE case_id = $1
+        summary = COALESCE($5::text, summary)
+    WHERE case_id = $1::bigint
     RETURNING {_COLUMNS};
 """
 
 SQL_INSERT = f"""
     INSERT INTO handoff_cases (pnr_code, trigger, booking_status, question,
                                top_similarity, similarity_scores, summary)
-    SELECT $1, $2, b.booking_status::text, $3, $4, $5::jsonb, $6
-    FROM pnr_bookings b WHERE b.pnr_code = $1
+    SELECT b.pnr_code, $2::text, b.booking_status::text, $3::text,
+           $4::double precision, $5::jsonb, $6::text
+    FROM pnr_bookings b WHERE b.pnr_code = $1::varchar
     RETURNING {_COLUMNS};
 """
 
