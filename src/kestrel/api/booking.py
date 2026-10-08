@@ -13,7 +13,13 @@ import json
 import secrets
 from datetime import datetime, timezone
 
-from kestrel.entitlements import STORABLE_TYPES, DisruptionContext, EntitlementDecision, evaluate
+from kestrel.entitlements import (
+    STORABLE_TYPES,
+    DisruptionContext,
+    EntitlementDecision,
+    evaluate,
+    local_iso,
+)
 
 SQL_LOAD_BOOKING = """
     SELECT b.pnr_code,
@@ -117,6 +123,8 @@ def booking_to_dict(row) -> dict:
             "destination": row["destination"],
             "departure_time": _iso(row["original_departure"]),
             "arrival_time": _iso(row["original_arrival"]),
+            "departure_local": local_iso(row["original_departure"], row["origin"]),
+            "arrival_local": local_iso(row["original_arrival"], row["destination"]),
             "status": row["original_status"],
             "disruption_reason": row["disruption_reason"],
             "aircraft_type": row["original_aircraft"],
@@ -127,6 +135,8 @@ def booking_to_dict(row) -> dict:
                 "flight_number": row["current_flight_number"],
                 "departure_time": _iso(row["current_departure"]),
                 "arrival_time": _iso(row["current_arrival"]),
+                "departure_local": local_iso(row["current_departure"], row["origin"]),
+                "arrival_local": local_iso(row["current_arrival"], row["destination"]),
             }
             if row["current_flight_id"]
             else None

@@ -214,6 +214,16 @@ def _local(dt: datetime, airport: str) -> datetime:
     return dt.astimezone(ZoneInfo(AIRPORTS.get(airport, (0, 0, "UTC", ""))[2]))
 
 
+def local_iso(dt: datetime | None, airport: str) -> str | None:
+    """ISO time in the airport's own time zone, offset included.
+
+    Timestamps are stored in UTC. A passenger reads times as local to the
+    airport, and so does the model: given UTC it reported a 16:21 Nairobi
+    departure as 13:21 in the first end-to-end run.
+    """
+    return _local(dt, airport).isoformat(timespec="minutes") if dt else None
+
+
 def _hours(delta: timedelta) -> float:
     return delta.total_seconds() / 3600
 

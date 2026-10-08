@@ -25,8 +25,10 @@ ALTERNATIVES = {
         {
             "flight_id": "real-flight-id",
             "flight_number": "KQ116",
-            "departure_time": "2026-10-15T22:45:00+03:00",
-            "arrival_time": "2026-10-16T06:10:00+02:00",
+            "departure_time": "2026-10-15T19:45:00+00:00",
+            "arrival_time": "2026-10-16T04:10:00+00:00",
+            "departure_local": "2026-10-15T22:45+03:00",
+            "arrival_local": "2026-10-16T06:10+02:00",
             "cabin_class": "ECONOMY",
             "available_seats": 12,
         }
@@ -76,9 +78,15 @@ class RestTier:
                 return httpx.Response(409, json={"detail": "Target flight does not exist."})
             return httpx.Response(200, json={
                 "success": True, "assigned_seat": "24A", "message": "ok",
-                "booking": {"current_flight": {"flight_number": "KQ116",
-                                               "departure_time": "2026-10-15T22:45:00+03:00"}},
-                "entitlements": {"vouchers": [{"entitlement_type": "MEAL", "status": "ISSUED"}]},
+                "booking": {"cabin_class": "ECONOMY",
+                            "current_flight": {"flight_number": "KQ116",
+                                               "departure_local": "2026-10-15T22:45+03:00"}},
+                "entitlements": {
+                    "vouchers": [{"entitlement_type": "MEAL", "status": "ISSUED", "quantity": 2,
+                                  "amount": 2500.0, "currency": "KES",
+                                  "voucher_code": "KQ-MV-0001-AB"}],
+                    "decision": {"notes": ["No cash compensation under EU261/UK261"]},
+                },
             })  # fmt: skip
         if path == "/api/policy/search":
             return httpx.Response(200, json={
@@ -197,3 +205,41 @@ def test_history_is_passed_to_the_model(rest):
     )  # fmt: skip
     contents = [m.content for m in llm.seen[0]]
     assert contents[1:] == ["Rebook me", "Done: KQ116.", "Which flight was that?"]
+
+
+def test_alternatives_reach_the_model_in_local_time_and_compact(rest):
+    llm = ScriptedLLM([
+        AIMessage(content="", tool_calls=[_call("find_alternative_flights_tool", {})]),
+        AIMessage(content="KQ116 leaves at 22:45."),
+    ])  # fmt: skip
+    result = agent.run_agent("What are my options?", llm=llm)
+    [option] = json.loads(result.tool_calls[0]["result"])["alternatives"]
+    assert option["departs_local"] == "2026-10-15T22:45+03:00"
+    assert "departure_time" not in option  # UTC never shown to the model
+
+
+def test_rebooking_result_carries_the_vouchers(rest):
+    """So the model needs no get_entitlements round trip after rebooking."""
+    llm = ScriptedLLM([
+        AIMessage(content="", tool_calls=[_call("reaccommodate_passenger_tool",
+                                                {"target_flight_id": "real-flight-id"})]),
+        AIMessage(content="Done."),
+    ])  # fmt: skip
+    result = agent.run_agent("Rebook me", llm=llm)
+    out = json.loads(result.tool_calls[0]["result"])
+    assert out["vouchers"][0]["voucher_code"] == "KQ-MV-0001-AB"
+    assert out["not_applicable"]
+    assert "/api/entitlements" not in rest.paths()
+
+
+def test_turn_timing_is_recorded(rest):
+    llm = ScriptedLLM([
+        AIMessage(content="", tool_calls=[_call("find_alternative_flights_tool", {})]),
+        AIMessage(content="Here."),
+    ])  # fmt: skip
+    result = agent.run_agent("Options?", llm=llm)
+    t = result.timing()
+    assert t["model_calls"] == 2
+    assert len(t["tool_ms"]) == 1
+    assert t["total_ms"] >= 0
+    assert result.to_dict()["timing"] == t

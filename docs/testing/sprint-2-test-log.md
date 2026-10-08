@@ -73,10 +73,22 @@ cancelled-target rejection audited, vouchers written once per type with stable
 codes and an `ENTITLEMENTS_ISSUED` audit row, and policy-store ordering on the
 120 ingested clauses.
 
+## 6. End-to-end agent runs (FR-02, FR-03, FR-04, FR-05)
+
+Passenger A27Z99 (Edwards): GOLD tier, business seat 5G on KQ886 NBO-BKK,
+cancelled for a TECHNICAL reason. REST tier, agent CLI, Gemini and Supabase
+all live; results checked afterwards in the database. 9 Oct 2026, ~01:00.
+
+| ID | Request | Expected | Actual | Result / correction |
+|---|---|---|---|---|
+| E2E-01 | "What am I entitled to now that my flight was cancelled?" | Agent calls `get_entitlements_tool` and reports only its output: re-routing, meal voucher, 3,000 goodwill points (GOLD, controllable cause), hotel to be decided on rebooking, no EU261 compensation (NBO departure, non-Community carrier) | Exactly that, including the Art. 3(1) reason for no compensation | Pass |
+| E2E-02 | "Rebook me on the next available flight" | Search, then rebook with a returned id; business seat; old seat released; vouchers issued and reported | Rebooked to KQ886 next day, seat **1C BUSINESS**; 5G back to AVAILABLE; vouchers KQ-MV-0496-VC (4 meals x KES 2,500), KQ-HT-4836-FG (1 night), KQ-TR-0426-JQ (transfer), KQ-AP-4395-UF (3,000 pts); audit rows AUTOMATED_REACCOMMODATION (cabin BUSINESS) then ENTITLEMENTS_ISSUED, actor PASSENGER:A27Z99 | Pass on data. **Defect:** the reply gave the departure as "13:21", which is UTC; local Nairobi time is 16:21. Corrected: the API now returns `departure_local` / `arrival_local` in each airport's time zone, and only those reach the model |
+| E2E-03 | "Can I bring my pet parrot in the cabin?" | Answer from KQ CoC Art. 8.9 (Animals: "dogs, cats, household birds and other pets") - or hand off if not retrieved | Retrieval ranked **KQ CoC Art. 8 (part 5)**, which contains 8.9, first - but at similarity **0.6645**, below tau = 0.75, so the question was handed off (case #2, LOW_SIMILARITY) | **False hand-off.** Retrieval was right; the threshold was wrong. Question-to-clause similarities sit around 0.6-0.7, lower than clause-to-clause (~0.84), so tau = 0.75 is too strict, not too lenient as first assumed (PC-06). Resolved by calibrating tau on the labelled question set (Section 7) |
+| E2E-04 | Response time of E2E-01..03 | NFR-01: a full agent turn within 15 s | Observed by the operator as slow; not measured | Corrected: each turn now records model and tool times (`[TIMING]` line); `thinking_level` set to `low`; the rebooking tool returns its vouchers so a rebooking needs one model call fewer; tool payloads trimmed to the fields the model uses. To be re-measured |
+
 ## Pending in this sprint
 
 - Re-run `tasks.ps1 test-all` after the hand-off fix (expect 142 passed).
-- End-to-end agent runs for PNR A27Z99 (business, GOLD, KQ886 TECHNICAL):
-  entitlements question, rebooking, out-of-scope question.
+- Re-measure agent response time after the latency changes (E2E-04).
 - Retrieval evaluation and tau calibration on the labelled question set.
 - Flutter client acceptance runs.

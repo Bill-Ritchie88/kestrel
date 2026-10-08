@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 
@@ -30,6 +31,12 @@ from kestrel import config  # noqa: F401  - loads .env before anything reads it
 
 FASTAPI_BASE_URL = os.getenv("FASTAPI_BASE_URL", "http://127.0.0.1:8000")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+# Gemini 3 models reason before answering; at the default depth each step of a
+# tool loop took several seconds. Routing a disrupted passenger needs little
+# reasoning - the rules live in code - so "low" is the default. Set
+# GEMINI_THINKING_LEVEL to minimal/low/medium/high, or to "" for the model's
+# own default.
+GEMINI_THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "low") or None
 MAX_TOOL_ITERATIONS = 5
 MAX_HISTORY_TURNS = 10
 
@@ -138,7 +145,20 @@ def find_alternative_flights_tool() -> str:
                     "case_id": case["case_id"] if case else None,
                 }
             )
-        return json.dumps({"status": "OK", "alternatives": data["alternatives"]})
+        # Only what the model needs to choose and to tell the passenger, in
+        # local airport time. Fewer tokens is a faster step.
+        compact = [
+            {
+                "flight_id": f["flight_id"],
+                "flight_number": f["flight_number"],
+                "departs_local": f.get("departure_local"),
+                "arrives_local": f.get("arrival_local"),
+                "cabin": f["cabin_class"],
+                "seats_left": f["available_seats"],
+            }
+            for f in data["alternatives"]
+        ]
+        return json.dumps({"status": "OK", "alternatives": compact})
     except (httpx.HTTPError, RuntimeError) as exc:
         return json.dumps({"status": "ERROR", "detail": f"Could not reach the backend: {exc}"})
 
@@ -159,18 +179,31 @@ def reaccommodate_passenger_tool(target_flight_id: str) -> str:
         data = response.json()
         if response.status_code == 200:
             _emit("rebooked", data)
-            current = (data.get("booking") or {}).get("current_flight") or {}
+            booking = data.get("booking") or {}
+            current = booking.get("current_flight") or {}
+            issued = data.get("entitlements") or {}
+            # The vouchers issued with the rebooking are returned here, so the
+            # model can tell the passenger without a further get_entitlements
+            # round trip (one model call fewer per rebooking).
             return json.dumps(
                 {
                     "status": "SUCCESS",
                     "seat": data["assigned_seat"],
+                    "cabin": booking.get("cabin_class"),
                     "flight_number": current.get("flight_number"),
-                    "departure_time": current.get("departure_time"),
-                    "entitlements_issued": [
-                        v["entitlement_type"]
-                        for v in ((data.get("entitlements") or {}).get("vouchers") or [])
+                    "departs_local": current.get("departure_local"),
+                    "arrives_local": current.get("arrival_local"),
+                    "vouchers": [
+                        {
+                            k: v[k]
+                            for k in ("entitlement_type", "quantity", "amount", "currency",
+                                      "points", "status", "voucher_code")
+                            if v.get(k) is not None
+                        }
+                        for v in issued.get("vouchers") or []
                         if v["status"] in ("ISSUED", "ELIGIBLE")
                     ],
+                    "not_applicable": (issued.get("decision") or {}).get("notes", []),
                 }
             )
         _emit("error", {"action": "reaccommodate", "detail": _detail(response)})
@@ -279,10 +312,12 @@ SYSTEM_PROMPT = (
     "OUT_OF_SCOPE, do not answer from your own knowledge: say a member of staff has been "
     "notified and will follow up.\n"
     "3. For what this passenger receives, call get_entitlements_tool and report only the "
-    "items and amounts it returns, including why anything does not apply. After a "
-    "successful rebooking, call it to tell the passenger what they now have.\n"
+    "items and amounts it returns, including why anything does not apply. A successful "
+    "rebooking already returns the vouchers issued with it: report those and do not call "
+    "get_entitlements_tool again.\n"
     "4. If the passenger asks for a person, call escalate_to_human_tool.\n"
-    "Be brief, warm and concrete. Times are local unless stated."
+    "Quote times from the *_local fields: they are local time at that airport, with the "
+    "offset shown. Be brief, warm and concrete."
 )
 
 
@@ -293,7 +328,8 @@ def get_llm():
     api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise ValueError("Missing GOOGLE_API_KEY in .env file.")
-    llm = ChatGoogleGenerativeAI(model=GEMINI_MODEL, temperature=0, api_key=api_key)
+    options = {"thinking_level": GEMINI_THINKING_LEVEL} if GEMINI_THINKING_LEVEL else {}
+    llm = ChatGoogleGenerativeAI(model=GEMINI_MODEL, temperature=0, api_key=api_key, **options)
     return llm.bind_tools(tools)
 
 
@@ -304,6 +340,18 @@ class AgentResult:
     tool_calls: list = field(default_factory=list)
     steps: int = 0
     stopped_at_limit: bool = False
+    # Wall-clock milliseconds, for NFR-01 (a full agent turn within 15 s).
+    model_ms: list = field(default_factory=list)
+    tool_ms: list = field(default_factory=list)
+    total_ms: int = 0
+
+    def timing(self) -> dict:
+        return {
+            "total_ms": self.total_ms,
+            "model_ms": self.model_ms,
+            "tool_ms": self.tool_ms,
+            "model_calls": len(self.model_ms),
+        }
 
     def to_dict(self) -> dict:
         return {
@@ -313,6 +361,8 @@ class AgentResult:
             "steps": self.steps,
             "stopped_at_limit": self.stopped_at_limit,
             "model": GEMINI_MODEL,
+            "thinking_level": GEMINI_THINKING_LEVEL,
+            "timing": self.timing(),
         }
 
 
@@ -337,6 +387,7 @@ def run_agent(user_query: str, history: list[dict] | None = None, llm=None) -> A
     events: list = []
     token = _events.set(events)
     result = AgentResult(reply="", events=events)
+    started = time.perf_counter()
     try:
         messages: list = [
             SystemMessage(content=SYSTEM_PROMPT),
@@ -345,7 +396,9 @@ def run_agent(user_query: str, history: list[dict] | None = None, llm=None) -> A
         ]
 
         for step in range(1, MAX_TOOL_ITERATIONS + 1):
+            t0 = time.perf_counter()
             ai_msg: AIMessage = model.invoke(messages)
+            result.model_ms.append(round((time.perf_counter() - t0) * 1000))
             messages.append(ai_msg)
             result.steps = step
 
@@ -360,7 +413,9 @@ def run_agent(user_query: str, history: list[dict] | None = None, llm=None) -> A
                         {"status": "ERROR", "detail": f"Unknown tool '{tool_call['name']}'."}
                     )
                 else:
+                    t0 = time.perf_counter()
                     output = selected.invoke(tool_call["args"])
+                    result.tool_ms.append(round((time.perf_counter() - t0) * 1000))
                 result.tool_calls.append(
                     {"name": tool_call["name"], "args": tool_call["args"], "result": output}
                 )
@@ -382,6 +437,7 @@ def run_agent(user_query: str, history: list[dict] | None = None, llm=None) -> A
         )
         return result
     finally:
+        result.total_ms = round((time.perf_counter() - started) * 1000)
         _events.reset(token)
 
 
@@ -415,7 +471,13 @@ def main(argv: list[str] | None = None) -> None:
     print(f"User Request: {args.prompt}")
 
     print("--- Final Agent Response ---")
-    print(run_agent(args.prompt).reply)
+    result = run_agent(args.prompt)
+    print(result.reply)
+    t = result.timing()
+    print(
+        f"\n[TIMING] total {t['total_ms']} ms | model calls {t['model_calls']} "
+        f"{t['model_ms']} ms | tools {t['tool_ms']} ms | thinking_level={GEMINI_THINKING_LEVEL}"
+    )
 
 
 if __name__ == "__main__":

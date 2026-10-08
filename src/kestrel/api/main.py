@@ -51,6 +51,7 @@ from kestrel.api.booking import (
     load_booking,
     voucher_to_dict,
 )
+from kestrel.entitlements import local_iso
 from kestrel.handoff import (
     PASSENGER_TRIGGERS,
     SQL_LIST_BY_STATUS,
@@ -324,6 +325,8 @@ async def find_alternatives(
                 "destination": r["destination"],
                 "departure_time": r["departure_time"].isoformat(),
                 "arrival_time": r["arrival_time"].isoformat() if r["arrival_time"] else None,
+                "departure_local": local_iso(r["departure_time"], r["origin"]),
+                "arrival_local": local_iso(r["arrival_time"], r["destination"]),
                 "aircraft_type": r["aircraft_type"],
                 "cabin_class": r["cabin_class"],
                 "available_seats": r["available_seats"],
