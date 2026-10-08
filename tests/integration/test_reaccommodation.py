@@ -42,10 +42,12 @@ async def disrupted(conn):
         FROM pnr_bookings b
         JOIN flights o   ON o.flight_id = b.original_flight_id
         JOIN flights alt ON alt.origin = o.origin AND alt.destination = o.destination
+        LEFT JOIN seats cur ON cur.seat_id = b.assigned_seat_id
         WHERE b.booking_status = 'DISRUPTED'
           AND alt.status = 'SCHEDULED' AND alt.departure_time > now()
           AND EXISTS (SELECT 1 FROM seats s
-                      WHERE s.flight_id = alt.flight_id AND s.status = 'AVAILABLE')
+                      WHERE s.flight_id = alt.flight_id AND s.status = 'AVAILABLE'
+                        AND s.cabin_class = COALESCE(cur.cabin_class, 'ECONOMY'))
         ORDER BY alt.departure_time
         LIMIT 1
     """)
@@ -151,3 +153,63 @@ async def test_no_seat_is_held_by_two_bookings(conn):
         ) d
     """)
     assert duplicates == 0
+
+
+# ---------------------------------------------------------------------------
+# Migration 004 (Sprint 2): cabin class, eligibility and audit completeness.
+# ---------------------------------------------------------------------------
+
+
+async def test_cabin_class_is_preserved(conn, disrupted):
+    """Fix 5: the Sprint 1 end-to-end run put an economy passenger in 1A."""
+    booking, target = disrupted
+    cabin_before = await conn.fetchval(
+        "SELECT COALESCE(cabin_class::text, 'ECONOMY') FROM seats WHERE seat_id = $1",
+        booking["assigned_seat_id"],
+    ) or "ECONOMY"
+    row = await conn.fetchrow(
+        "SELECT * FROM reaccommodate_passenger_atomic($1, $2, $3)",
+        booking["pnr_code"], target, "PYTEST",
+    )  # fmt: skip
+    assert row["success"] is True
+    cabin_after = await conn.fetchval(
+        """SELECT s.cabin_class::text FROM pnr_bookings b
+           JOIN seats s ON s.seat_id = b.assigned_seat_id WHERE b.pnr_code = $1""",
+        booking["pnr_code"],
+    )
+    assert cabin_after == cabin_before
+
+
+async def test_confirmed_booking_cannot_be_moved_for_free(conn, disrupted):
+    _, target = disrupted
+    pnr = await conn.fetchval(
+        "SELECT pnr_code FROM pnr_bookings WHERE booking_status = 'CONFIRMED' LIMIT 1"
+    )
+    if pnr is None:
+        pytest.skip("No confirmed booking in the dataset.")
+    row = await conn.fetchrow(
+        "SELECT * FROM reaccommodate_passenger_atomic($1, $2, $3)", pnr, target, "PYTEST"
+    )
+    assert row["success"] is False
+    reason = await conn.fetchval(
+        """SELECT details->>'reason' FROM audit_logs
+           WHERE pnr_code = $1 ORDER BY timestamp DESC LIMIT 1""",
+        pnr,
+    )
+    assert reason == "BOOKING_NOT_DISRUPTED"
+
+
+async def test_cancelled_target_rejection_is_audited(conn, disrupted):
+    """003 returned early without an audit row for a cancelled target."""
+    booking, _ = disrupted
+    cancelled = await conn.fetchval("SELECT flight_id FROM flights WHERE status = 'CANCELLED' LIMIT 1")
+    await conn.fetchrow(
+        "SELECT * FROM reaccommodate_passenger_atomic($1, $2, $3)",
+        booking["pnr_code"], cancelled, "PYTEST",
+    )  # fmt: skip
+    reason = await conn.fetchval(
+        """SELECT details->>'reason' FROM audit_logs
+           WHERE pnr_code = $1 ORDER BY timestamp DESC LIMIT 1""",
+        booking["pnr_code"],
+    )
+    assert reason in ("FLIGHT_NOT_SCHEDULED", "ALREADY_ON_TARGET_FLIGHT")
