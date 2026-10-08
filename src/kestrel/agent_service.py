@@ -69,7 +69,17 @@ def _run(token: str, message: str, history: list[dict]) -> dict:
     # Runs in a worker thread with its own copy of the request context, so the
     # token bound here is visible to this conversation's tool calls only.
     agent.bind_token(token)
-    return agent.run_agent(message, history).to_dict()
+    body = agent.run_agent(message, history).to_dict()
+    # One line per turn in the service window: evidence for the NFR-02 latency
+    # log without opening the browser's developer tools.
+    t = body["timing"]
+    tools = ",".join(c["name"] for c in body["tool_calls"]) or "-"
+    print(
+        f"[TIMING] total={t['total_ms']}ms model={t['model_ms']} tools={t['tool_ms']} "
+        f"calls={t['model_calls']} used={tools}",
+        flush=True,
+    )
+    return body
 
 
 @app.post("/api/chat")
