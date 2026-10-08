@@ -2,9 +2,8 @@
 -- Entitlements (FR-04, DR-06), hand-off cases (FR-05, FR-09, DR-08) and the
 -- cancellation reason the entitlement rules depend on.
 --
--- Run after 004 and 005. Safe to re-run.
-
-BEGIN;
+-- Run after 004 and 005. Safe to re-run. Runs as one transaction in the
+-- Supabase SQL editor and through apply_migration.
 
 -- ---------------------------------------------------------------------------
 -- 1. Why a flight was cancelled.
@@ -58,6 +57,9 @@ BEGIN
                 v_rows;
         END IF;
         DROP TABLE public.vouchers;
+        -- The placeholder's own enum types, used by nothing else.
+        DROP TYPE IF EXISTS public.voucher_type;
+        DROP TYPE IF EXISTS public.voucher_status;
     END IF;
 END $$;
 
@@ -116,4 +118,3 @@ CREATE INDEX IF NOT EXISTS idx_handoff_cases_open
 CREATE INDEX IF NOT EXISTS idx_handoff_cases_pnr ON handoff_cases (pnr_code);
 ALTER TABLE handoff_cases ENABLE ROW LEVEL SECURITY;
 
-COMMIT;
