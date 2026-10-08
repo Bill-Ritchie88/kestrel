@@ -9,13 +9,16 @@ changed since the last run are not re-embedded, so re-running is cheap.
     python scripts/ingest_policies.py --dry-run     # chunk only: no network, no database
     python scripts/ingest_policies.py               # embed and load
     python scripts/ingest_policies.py --prune       # also delete chunks no longer in the sources
+    python scripts/ingest_policies.py --manifest    # record the SHA-256 of each source file
 """
 
 import argparse
 import asyncio
+import hashlib
 import os
 import sys
 from collections import Counter
+from datetime import date
 from pathlib import Path
 
 from kestrel import config  # noqa: F401  - loads .env
@@ -78,6 +81,17 @@ async def ingest(prune: bool) -> int:
     return 0
 
 
+def write_manifest() -> int:
+    """Record which exact source texts the corpus was built from."""
+    lines = [f"# Policy source texts, recorded {date.today().isoformat()}"]
+    for path in sorted(SOURCES_DIR.glob("*.txt")):
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        lines.append(f"{digest}  {path.name}")
+    (SOURCES_DIR / "MANIFEST.sha256").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print("\n".join(lines))
+    return 0
+
+
 def dry_run() -> int:
     chunks, missing = load_corpus(SOURCES_DIR)
     for name in missing:
@@ -96,5 +110,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ingest the policy corpus.")
     parser.add_argument("--dry-run", action="store_true", help="Chunk only; no network")
     parser.add_argument("--prune", action="store_true", help="Delete chunks no longer in sources")
+    parser.add_argument("--manifest", action="store_true", help="Write MANIFEST.sha256 and exit")
     args = parser.parse_args()
-    sys.exit(dry_run() if args.dry_run else asyncio.run(ingest(args.prune)))
+    if args.manifest:
+        sys.exit(write_manifest())
+    if args.dry_run:
+        sys.exit(dry_run())
+    code = asyncio.run(ingest(args.prune))
+    if code == 0:
+        write_manifest()
+    sys.exit(code)

@@ -45,3 +45,9 @@ htmlcov/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Policy source texts (data/policy/sources/*.txt) are third-party documents:
+# they are not redistributed in this repository. data/policy/sources/README.md
+# says where each one comes from; MANIFEST.sha256 records the exact version
+# ingested.
+data/policy/sources/*.txt
