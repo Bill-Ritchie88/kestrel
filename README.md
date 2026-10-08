@@ -92,6 +92,11 @@ Apply the migrations **in this order** in the Supabase SQL editor:
 | 001 | `db/migrations/001_baseline_reaccommodate_passenger_atomic.sql` | The procedure as first deployed. Kept unchanged as an auditable baseline. |
 | 002 | `db/migrations/002_indexes_and_rls.sql` | Indexes for auth, seat claiming and alternative search; row-level security. |
 | 003 | `db/migrations/003_reaccommodate_passenger_atomic_v2.sql` | The corrected procedure. |
+| 004 | `db/migrations/004_reaccommodate_cabin_class.sql` | Procedure v3: same-cabin seats (Fix 5), disrupted bookings only, every refusal audited. |
+| 005 | `db/migrations/005_policy_retrieval.sql` | `policy_chunks` (pgvector) and the upsert/match functions (FR-02). |
+| 006 | `db/migrations/006_entitlements_and_handoff.sql` | `vouchers` (final shape), `handoff_cases`, `flights.disruption_reason` (FR-04, FR-05, FR-09). |
+| 007 | `db/migrations/007_flights_rls.sql` | Row-level security on `flights`, missed in 002. |
+| 008 | `db/migrations/008_advisor_fixes.sql` | Procedure `search_path`; foreign-key indexes on `pnr_bookings`. |
 | — | `db/seeds/reset_demo_state.sql` | Repeatable reset to a known disrupted state. Not a migration; run with `make reset`. |
 
 Migration 003 corrects five defects in 001, each covered by a test in

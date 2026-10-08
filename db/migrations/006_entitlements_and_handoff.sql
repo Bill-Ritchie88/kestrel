@@ -35,8 +35,10 @@ END $$;
 --
 -- The deployed table was created as a placeholder in Sprint 1 and nothing has
 -- ever written to it (DR-06: "its final columns are set in Sprint 2"). It is
--- replaced only if it is empty; if it holds rows the migration stops rather
--- than destroy data.
+-- set aside, not dropped: renamed to vouchers_sprint1_placeholder so that no
+-- data can be lost and the migration needs no destructive statement. If it
+-- holds rows the migration stops instead. Drop the placeholder (and its enum
+-- types voucher_type and voucher_status) by hand once it is no longer wanted.
 -- ---------------------------------------------------------------------------
 DO $$
 DECLARE
@@ -56,10 +58,10 @@ BEGIN
                 'vouchers holds % row(s) in the old shape; migrate them by hand before running 006',
                 v_rows;
         END IF;
-        DROP TABLE public.vouchers;
-        -- The placeholder's own enum types, used by nothing else.
-        DROP TYPE IF EXISTS public.voucher_type;
-        DROP TYPE IF EXISTS public.voucher_status;
+        ALTER TABLE public.vouchers RENAME TO vouchers_sprint1_placeholder;
+        -- Free the constraint and index names the new table reuses.
+        ALTER TABLE public.vouchers_sprint1_placeholder
+            RENAME CONSTRAINT vouchers_pkey TO vouchers_sprint1_placeholder_pkey;
     END IF;
 END $$;
 
