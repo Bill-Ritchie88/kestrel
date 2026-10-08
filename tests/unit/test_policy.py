@@ -14,6 +14,7 @@ from kestrel.policy.embeddings import (
     TASK_QUERY,
     EmbeddingError,
     GeminiEmbedder,
+    QuotaExhaustedError,
     normalise,
     to_pgvector,
 )
@@ -101,9 +102,18 @@ def test_normalise_and_pgvector_format():
         normalise([0.0, 0.0])
 
 
-def _gemini(handler):
-    return GeminiEmbedder("test-key", dimensions=3, client=httpx.AsyncClient(
-        transport=httpx.MockTransport(handler)), max_retries=1)  # fmt: skip
+def _gemini(handler, waits=None):
+    async def no_sleep(seconds):
+        if waits is not None:
+            waits.append(seconds)
+
+    return GeminiEmbedder(
+        "test-key",
+        dimensions=3,
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        max_retries=2,
+        sleep=no_sleep,
+    )
 
 
 async def test_embedder_sends_task_type_and_normalises():
@@ -122,16 +132,47 @@ async def test_embedder_sends_task_type_and_normalises():
     assert seen["key"] == "test-key"  # header, never the URL
 
 
-async def test_embedder_retries_quota_errors_then_fails_clearly():
+def _quota_error(quota_id, delay="34s"):
+    return httpx.Response(429, json={"error": {"code": 429, "message": "quota", "details": [
+        {"@type": "type.googleapis.com/google.rpc.QuotaFailure",
+         "violations": [{"quotaId": quota_id}]},
+        {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": delay},
+    ]}})  # fmt: skip
+
+
+async def test_per_minute_quota_waits_as_long_as_the_api_asks_then_succeeds():
+    responses = iter([
+        _quota_error("EmbedContentRequestsPerMinutePerProjectPerModel-FreeTier", "34s"),
+        httpx.Response(200, json={"embeddings": [{"values": [1, 0, 0]}]}),
+    ])  # fmt: skip
+    waits = []
+    [vector] = await _gemini(lambda r: next(responses), waits).embed(["x"], TASK_QUERY)
+    assert waits == [35.0]  # retryDelay + 1 s margin
+    assert vector == pytest.approx([1.0, 0.0, 0.0])
+
+
+async def test_daily_quota_stops_immediately():
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        return _quota_error("EmbedContentRequestsPerDayPerProjectPerModel-FreeTier")
+
+    with pytest.raises(QuotaExhaustedError, match="Daily"):
+        await _gemini(handler).embed(["x"], TASK_QUERY)
+    assert len(calls) == 1
+
+
+async def test_embedder_gives_up_after_retries():
     calls = []
 
     def handler(request):
         calls.append(1)
         return httpx.Response(429, text="quota")
 
-    with pytest.raises(EmbeddingError, match="429"):
+    with pytest.raises(EmbeddingError, match="still exceeded"):
         await _gemini(handler).embed(["x"], TASK_QUERY)
-    assert len(calls) == 2  # first try + one retry
+    assert len(calls) == 3  # first try + two retries
 
 
 class _FakeEmbedder:

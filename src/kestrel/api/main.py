@@ -127,7 +127,11 @@ async def lifespan(app: FastAPI):
     print("[INFO] Initializing database connection pool...")
     await db.open_pool()
     api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-    app.state.retriever = PolicyRetriever(GeminiEmbedder(api_key)) if api_key else None
+    # One quick retry only: a passenger is waiting on this request, so a rate
+    # limit becomes a 502 rather than a two-minute wait (ingestion waits).
+    app.state.retriever = (
+        PolicyRetriever(GeminiEmbedder(api_key, max_retries=1)) if api_key else None
+    )
     if app.state.retriever is None:
         print("[WARN] GOOGLE_API_KEY is not set - policy search will return 503.")
     yield
