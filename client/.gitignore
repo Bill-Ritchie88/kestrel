@@ -1,0 +1,19 @@
+# Flutter / Dart build output
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+coverage/
+*.iml
+.idea/
+# Platform folders are generated locally by `flutter create .`
+# (see README) and are not part of the source.
+android/
+ios/
+web/
+windows/
+linux/
+macos/

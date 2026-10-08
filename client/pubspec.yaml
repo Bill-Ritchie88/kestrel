@@ -1,0 +1,25 @@
+name: kestrel_app
+description: Project Kestrel - Kenya Airways disruption recovery client (FR-08).
+publish_to: "none"
+version: 0.2.0+1
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # REST tier (:8000) and agent service (:8001) over HTTP.
+  http: ">=1.2.0 <3.0.0"
+  # Inter, the design system's typeface (kestrel-ui-design-system.md).
+  google_fonts: ">=6.2.0 <9.0.0"
+  # Voice dictation through the device's own recogniser (FR-08, IR-07).
+  speech_to_text: ">=7.0.0 <9.0.0"
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ">=4.0.0 <8.0.0"
+
+flutter:
+  uses-material-design: true
