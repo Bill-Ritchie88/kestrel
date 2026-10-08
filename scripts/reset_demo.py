@@ -44,11 +44,15 @@ FIND_DEMO_CASE = """
     JOIN passengers p ON p.passenger_id = b.passenger_id
     JOIN flights    o ON o.flight_id    = b.original_flight_id
     JOIN flights  alt ON alt.origin = o.origin AND alt.destination = o.destination
+    LEFT JOIN seats cur ON cur.seat_id = b.assigned_seat_id
     WHERE b.booking_status = 'DISRUPTED'
       AND alt.status = 'SCHEDULED'
       AND alt.departure_time > now() + interval '6 hours'
+      -- Same cabin as the passenger's seat: since migration 004 the procedure
+      -- will not move a passenger into a different cabin.
       AND EXISTS (SELECT 1 FROM seats s
-                  WHERE s.flight_id = alt.flight_id AND s.status = 'AVAILABLE')
+                  WHERE s.flight_id = alt.flight_id AND s.status = 'AVAILABLE'
+                    AND s.cabin_class = COALESCE(cur.cabin_class, 'ECONOMY'))
     ORDER BY alt.departure_time, b.pnr_code
     LIMIT 1
 """

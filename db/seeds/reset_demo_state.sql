@@ -1,5 +1,5 @@
--- Project Kestrel - migration 004
--- Demo state reset. Safe to run repeatedly.
+-- Project Kestrel - demo state reset (seed, not a migration). Safe to run repeatedly.
+-- Requires migrations 000-006.
 --
 -- Puts the system back into a known pre-disruption state with every flight in
 -- the future, so a demonstration behaves identically whether it runs today or
@@ -34,7 +34,12 @@ FROM shift s;
 -- 2. Every flight operating, every seat free, every booking on its original
 --    flight with no recovery applied.
 -- ---------------------------------------------------------------------------
-UPDATE flights SET status = 'SCHEDULED';
+UPDATE flights SET status = 'SCHEDULED', disruption_reason = NULL;
+
+-- Entitlements belong to a disruption; a reset creates a new one, so the old
+-- vouchers no longer apply. Hand-off cases are kept as evidence, like
+-- audit_logs.
+DELETE FROM vouchers;
 
 UPDATE seats
 SET status = 'AVAILABLE', row_version = row_version + 1
@@ -87,6 +92,25 @@ SET booking_status = 'DISRUPTED', updated_at = now()
 FROM flights f
 WHERE f.flight_id = b.original_flight_id
   AND f.status = 'CANCELLED';
+
+-- Record why each flight was cancelled (migration 006). The busiest flight is
+-- given a cause within the airline's control and the other two extraordinary
+-- causes, so a single reset exercises both branches of the entitlement rules:
+-- compensation and goodwill points on one, care only on the others.
+WITH ranked AS (
+    SELECT f.flight_id,
+           row_number() OVER (ORDER BY count(b.pnr_code) DESC, f.flight_id) AS rn
+    FROM flights f
+    JOIN pnr_bookings b ON b.original_flight_id = f.flight_id
+    WHERE f.status = 'CANCELLED'
+    GROUP BY f.flight_id
+)
+UPDATE flights f
+SET disruption_reason = CASE r.rn WHEN 1 THEN 'TECHNICAL'
+                                  WHEN 2 THEN 'WEATHER'
+                                  ELSE 'ATC' END
+FROM ranked r
+WHERE r.flight_id = f.flight_id;
 
 -- ---------------------------------------------------------------------------
 -- 5. Optional. Clears the audit trail. Left commented out: the log
