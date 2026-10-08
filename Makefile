@@ -1,7 +1,7 @@
 
 
 .DEFAULT_GOAL := help
-.PHONY: help setup lock lint fmt test test-all smoke data reset api agent hooks clean
+.PHONY: help setup lock lint fmt test test-all smoke data reset api agent-api agent ingest evaluate loadtest hooks clean
 
 PY ?= python
 
@@ -44,6 +44,18 @@ reset:  ## Reset the demo data: schedule re-anchored to now, disruption recreate
 
 api:  ## Run the REST tier with reload
 	uvicorn kestrel.api.main:app --reload
+
+agent-api:  ## Run the agent service (chat endpoint for the Flutter client) on :8001
+	uvicorn kestrel.agent_service:app --port 8001 --reload
+
+ingest:  ## Chunk, embed and load the policy corpus (data/policy/sources)
+	$(PY) scripts/ingest_policies.py
+
+evaluate:  ## Retrieval evaluation and tau calibration (data/eval/policy_questions.csv)
+	$(PY) scripts/evaluate_retrieval.py
+
+loadtest:  ## Concurrent rebooking test, rolled back (NFR-01, NFR-02)
+	$(PY) scripts/load_test.py --passengers 12
 
 agent:  ## Run the agent for a disrupted passenger (needs `make api` running)
 	$(PY) scripts/agent_demo.py

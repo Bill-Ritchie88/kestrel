@@ -32,6 +32,13 @@ switch ($Target) {
     "data"     { & $Py scripts/dataset_generator.py --truncate --days 7 --seed 42 }
     "reset"    { & $Py scripts/reset_demo.py }
     "api"      { & $Py -m uvicorn kestrel.api.main:app --reload }
+    "agent-api" { & $Py -m uvicorn kestrel.agent_service:app --port 8001 --reload }
+    "up"       { Start-Process powershell -ArgumentList "-NoExit", "-Command", "& '$Py' -m uvicorn kestrel.api.main:app --reload"
+                 Start-Process powershell -ArgumentList "-NoExit", "-Command", "& '$Py' -m uvicorn kestrel.agent_service:app --port 8001 --reload"
+                 Write-Host "REST tier on :8000, agent service on :8001 (two new windows)" }
+    "ingest"   { & $Py scripts/ingest_policies.py }
+    "evaluate" { & $Py scripts/evaluate_retrieval.py }
+    "loadtest" { & $Py scripts/load_test.py --passengers 12 }
     "agent"    { & $Py scripts/agent_demo.py }
     "hooks"    { & $Py -m pre_commit install; & $Py -m pre_commit run --all-files }
     "clean"    { Get-ChildItem -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
@@ -49,6 +56,11 @@ switch ($Target) {
             @("data",     "Regenerate the synthetic dataset"),
             @("reset",    "Reset the demo data to now"),
             @("api",      "Run the REST tier with reload"),
+            @("agent-api","Run the agent service (Flutter chat) on :8001"),
+            @("up",       "Start the REST tier and the agent service together"),
+            @("ingest",   "Chunk, embed and load the policy corpus"),
+            @("evaluate", "Retrieval evaluation and tau calibration"),
+            @("loadtest", "Concurrent rebooking test (rolled back)"),
             @("agent",    "Run the agent for a disrupted passenger"),
             @("hooks",    "Install pre-commit hooks"),
             @("clean",    "Remove caches")
