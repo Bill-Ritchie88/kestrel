@@ -32,7 +32,12 @@ ARTICLE 9: SCHEDULES, DELAYS, CANCELLATION OF FLIGHTS
 9.2 Cancellation. If we cancel a flight we shall carry you on another of our services.
 """
 
-EU_SAMPLE = """Whereas:
+EU_SAMPLE = """Chat AI
+Hello! Is there any question I can help you with?
+What is the national bird of the United States?
+32004R0261
+Regulation (EC) No 261/2004 of the European Parliament and of the Council
+Whereas:
 (14) Obligations on operating air carriers should be limited or excluded in cases where an event has been caused by extraordinary circumstances which could not have been avoided even if all reasonable measures had been taken.
 Article 9
 Right to care
@@ -62,6 +67,15 @@ def test_eurlex_title_on_next_line_and_recitals_kept():
     assert "extraordinary circumstances" in preamble.content
     assert art9.title == "Right to care"
     assert art9.clause_ref == "EU261 Art. 9"
+
+
+def test_text_injected_above_the_document_is_discarded():
+    """A browser extension added a chat widget's text above the regulation
+    when the page was copied; it must not become part of the corpus."""
+    content = " ".join(c.content for c in chunk_text(EU_SAMPLE, EU))
+    assert "national bird" not in content
+    assert "Chat AI" not in content
+    assert "32004R0261" in content
 
 
 def test_long_articles_are_split_and_every_part_is_bounded():

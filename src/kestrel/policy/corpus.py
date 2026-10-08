@@ -30,6 +30,10 @@ class Source:
     citation: str  # prefix used in clause references
     url: str
     keep_preamble: bool  # text before the first article (EU recitals) is useful
+    # Where the document proper begins. Anything above the first match - page
+    # navigation, or text injected by a browser extension when the page was
+    # copied - is discarded before chunking.
+    start_pattern: str
 
 
 # Keyed by the file name (without .txt) in data/policy/sources/.
@@ -40,6 +44,7 @@ SOURCES: dict[str, Source] = {
         citation="KQ CoC",
         url="https://www.kenya-airways.com/en-ke/policies/conditions-of-carriage/",
         keep_preamble=False,  # the page header and navigation precede Article 1
+        start_pattern=r"^[ \t]*ARTICLE[ \t]+1\b",
     ),
     "eu261": Source(
         code="EU261",
@@ -47,6 +52,7 @@ SOURCES: dict[str, Source] = {
         citation="EU261",
         url="https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=CELEX:32004R0261",
         keep_preamble=True,  # recital 14 defines extraordinary circumstances
+        start_pattern=r"^[ \t]*(?:32004R0261|Regulation \(EC\) No 261/2004)",
     ),
     "montreal-convention": Source(
         code="MONTREAL_1999",
@@ -54,6 +60,7 @@ SOURCES: dict[str, Source] = {
         citation="Montreal Convention",
         url="https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=CELEX:22001A0718(01)",
         keep_preamble=False,
+        start_pattern=r"^[ \t]*(?:22001A0718|Convention for the Unification)",
     ),
 }
 
@@ -125,6 +132,9 @@ def _split_long(body: str) -> list[str]:
 def chunk_text(text: str, source: Source) -> list[Chunk]:
     """Split one source document into citable chunks."""
     text = _clean(text)
+    start = re.search(source.start_pattern, text, re.M)
+    if start:
+        text = text[start.start() :]
     matches = list(_ARTICLE.finditer(text))
     sections: list[tuple[str, str, str]] = []  # (article number, title, body)
 
