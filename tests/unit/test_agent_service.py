@@ -54,3 +54,35 @@ def test_chat_returns_reply_and_events(monkeypatch):
 def test_message_length_is_bounded():
     r = client.post("/api/chat", json={"message": "x" * 1001}, headers={"Authorization": "Bearer a"})
     assert r.status_code == 422
+
+
+def _valid_session(monkeypatch):
+    rest = httpx.MockTransport(lambda r: httpx.Response(200, json={"pnr_code": "S958PC"}))
+    monkeypatch.setattr(agent, "http_client", httpx.Client(transport=rest))
+
+
+def test_quota_error_is_a_clear_503_and_is_logged(monkeypatch, tmp_path):
+    _valid_session(monkeypatch)
+    monkeypatch.setattr(agent_service, "LOG_DIR", tmp_path)
+
+    def quota(message, history):
+        raise RuntimeError("429 RESOURCE_EXHAUSTED: quota exceeded")
+
+    monkeypatch.setattr(agent, "run_agent", quota)
+    r = client.post("/api/chat", json={"message": "Rebook me"}, headers={"Authorization": "Bearer a"})
+    assert r.status_code == 503
+    assert "usage limit" in r.json()["detail"]
+    line = (tmp_path / "agent-turns.jsonl").read_text(encoding="utf-8").strip()
+    assert '"error": "RuntimeError"' in line
+
+
+def test_successful_turn_is_logged_with_timing(monkeypatch, tmp_path):
+    _valid_session(monkeypatch)
+    monkeypatch.setattr(agent_service, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(agent, "run_agent", lambda m, h: agent.AgentResult(reply="ok"))
+    r = client.post("/api/chat", json={"message": "hi"}, headers={"Authorization": "Bearer a"})
+    assert r.status_code == 200
+    import json as _json
+
+    rec = _json.loads((tmp_path / "agent-turns.jsonl").read_text(encoding="utf-8"))
+    assert rec["message"] == "hi" and "total_ms" in rec and rec["tools"] == []

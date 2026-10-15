@@ -58,3 +58,6 @@ data/policy/sources/*.txt
 .sprint2-tmp/
 # Source policy documents are not redistributed (see data/policy/sources/README.md)
 /*.pdf
+
+# Agent turn log (timing evidence; kept locally)
+logs/

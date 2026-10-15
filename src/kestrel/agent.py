@@ -37,6 +37,12 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
 # GEMINI_THINKING_LEVEL to minimal/low/medium/high, or to "" for the model's
 # own default.
 GEMINI_THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "low") or None
+# The Gemini client retries a failed call up to 6 times with growing waits by
+# default. On a 429 (quota) that silently stretched one chat turn past the
+# client's 45 s limit. Two attempts and a per-call timeout keep a turn bounded;
+# a quota error then reaches the passenger as a clear message instead.
+GEMINI_MAX_ATTEMPTS = int(os.getenv("GEMINI_MAX_ATTEMPTS", "2"))
+GEMINI_TIMEOUT_S = float(os.getenv("GEMINI_TIMEOUT_S", "20"))
 MAX_TOOL_ITERATIONS = 5
 MAX_HISTORY_TURNS = 10
 
@@ -329,7 +335,14 @@ def get_llm():
     if not api_key:
         raise ValueError("Missing GOOGLE_API_KEY in .env file.")
     options = {"thinking_level": GEMINI_THINKING_LEVEL} if GEMINI_THINKING_LEVEL else {}
-    llm = ChatGoogleGenerativeAI(model=GEMINI_MODEL, temperature=0, api_key=api_key, **options)
+    llm = ChatGoogleGenerativeAI(
+        model=GEMINI_MODEL,
+        temperature=0,
+        api_key=api_key,
+        max_retries=GEMINI_MAX_ATTEMPTS,
+        timeout=GEMINI_TIMEOUT_S,
+        **options,
+    )
     return llm.bind_tools(tools)
 
 

@@ -15,8 +15,12 @@ every tool call; it never enters the model's prompt.
 
 from __future__ import annotations
 
+import json
 import os
+import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException, status
 from fastapi.concurrency import run_in_threadpool
@@ -65,11 +69,43 @@ def health():
     }
 
 
+# Every chat turn is appended to logs/agent-turns.jsonl (one JSON object per
+# line: timing, tools used, or the error). The file is the evidence for the
+# NFR-02 latency log and survives the service window being closed.
+LOG_DIR = Path(os.getenv("KESTREL_LOG_DIR", Path(__file__).resolve().parents[2] / "logs"))
+
+
+def _log_turn(record: dict) -> None:
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        record = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), **record}
+        with (LOG_DIR / "agent-turns.jsonl").open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+    except OSError:
+        pass  # logging must never break a passenger's turn
+
+
+def _is_quota_error(exc: Exception) -> bool:
+    text = f"{type(exc).__name__} {exc}"
+    return "429" in text or "RESOURCE_EXHAUSTED" in text or "ResourceExhausted" in text
+
+
 def _run(token: str, message: str, history: list[dict]) -> dict:
     # Runs in a worker thread with its own copy of the request context, so the
     # token bound here is visible to this conversation's tool calls only.
     agent.bind_token(token)
-    body = agent.run_agent(message, history).to_dict()
+    started = time.perf_counter()
+    try:
+        body = agent.run_agent(message, history).to_dict()
+    except Exception as exc:
+        _log_turn({
+            "message": message[:200],
+            "error": type(exc).__name__,
+            "detail": str(exc)[:500],
+            "elapsed_ms": round((time.perf_counter() - started) * 1000),
+        })
+        print(f"[ERROR] {type(exc).__name__}: {str(exc)[:300]}", flush=True)
+        raise
     # One line per turn in the service window: evidence for the NFR-02 latency
     # log without opening the browser's developer tools.
     t = body["timing"]
@@ -79,6 +115,14 @@ def _run(token: str, message: str, history: list[dict]) -> dict:
         f"calls={t['model_calls']} used={tools}",
         flush=True,
     )
+    _log_turn({
+        "message": message[:200],
+        "steps": body["steps"],
+        "tools": [c["name"] for c in body["tool_calls"]],
+        "model": body["model"],
+        "thinking_level": body["thinking_level"],
+        **t,
+    })
     return body
 
 
@@ -109,3 +153,14 @@ async def chat(payload: ChatRequest, authorization: str | None = Header(default=
         )
     except ValueError as exc:  # missing API key
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except Exception as exc:
+        if _is_quota_error(exc):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Kestrel's AI service has reached its usage limit for now. "
+                "Please try again in a few minutes, or use 'Talk to a person'.",
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Kestrel couldn't complete that request. Please try again.",
+        ) from exc
