@@ -51,3 +51,10 @@ desktop.ini
 # says where each one comes from; MANIFEST.sha256 records the exact version
 # ingested.
 data/policy/sources/*.txt
+
+# Local tooling and working files (not part of the project)
+.claude/settings.local.json
+.mcp.json
+.sprint2-tmp/
+# Source policy documents are not redistributed (see data/policy/sources/README.md)
+/*.pdf
