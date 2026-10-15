@@ -190,8 +190,15 @@ class _FakeConn:
         assert "match_policy_chunks" in sql
         assert vector.startswith("[")
         return [
-            {"chunk_id": f"C{i}", "source": "EU261", "clause_ref": f"EU261 Art. {i}",
-             "title": "t", "content": "c", "source_url": None, "similarity": s}  # fmt: skip
+            {
+                "chunk_id": f"C{i}",
+                "source": "EU261",
+                "clause_ref": f"EU261 Art. {i}",
+                "title": "t",
+                "content": "c",
+                "source_url": None,
+                "similarity": s,
+            }  # fmt: skip
             for i, s in enumerate(self.sims[:k])
         ]
 
@@ -206,3 +213,35 @@ async def test_scope_guard_threshold_is_inclusive(top, in_scope):
 
 def test_empty_result_is_out_of_scope():
     assert RetrievalResult("q", [], 0.75).in_scope is False
+
+
+def test_evaluation_reference_matching_respects_article_numbers():
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "scripts" / "evaluate_retrieval.py"
+    spec = importlib.util.spec_from_file_location("evaluate_retrieval", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    assert mod.ref_matches("EU261 Art. 9", "EU261 Art. 9")
+    assert mod.ref_matches("KQ CoC Art. 8 (part 5 of 5)", "KQ CoC Art. 8")
+    assert not mod.ref_matches("KQ CoC Art. 10 (part 1 of 2)", "KQ CoC Art. 1")
+    assert not mod.ref_matches("EU261 Art. 10", "EU261 Art. 1")
+
+
+def test_labelled_question_set_is_well_formed():
+    import csv
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "data" / "eval" / "policy_questions.csv"
+    rows = list(csv.DictReader(path.open(encoding="utf-8")))
+    assert len({r["question_id"] for r in rows}) == len(rows)
+    assert {r["split"] for r in rows} == {"calibration", "test"}
+    for r in rows:
+        assert r["in_scope"] in {"0", "1"}
+        # in-scope questions name the clause that answers them; out-of-scope ones none
+        assert bool(r["expected_refs"].strip()) == (r["in_scope"] == "1"), r["question_id"]
+    for split in ("calibration", "test"):
+        part = [r for r in rows if r["split"] == split]
+        assert any(r["in_scope"] == "1" for r in part) and any(r["in_scope"] == "0" for r in part)

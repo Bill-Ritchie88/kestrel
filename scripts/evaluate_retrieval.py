@@ -4,7 +4,7 @@ Retrieval evaluation and threshold calibration (FR-05, NFR-04, Objective iv).
 Input: data/eval/policy_questions.csv, a hand-labelled set of passenger
 questions with columns
 
-    question_id, split, in_scope, expected_refs, question
+    question_id, split, in_scope, expected_refs, topic, question, label_note
 
   split          calibration | test   (tau is chosen on calibration, reported on test)
   in_scope       1 if the policy corpus should answer it, 0 if it should be handed off
@@ -14,8 +14,9 @@ questions with columns
 Every question is embedded once and its top-3 clauses retrieved. Then:
 
   * Recall@3 - share of in-scope questions with at least one expected clause in
-    the top 3 (a reference matches if the retrieved clause_ref starts with it,
-    so "EU261 Art. 9" matches "EU261 Art. 9 (part 1 of 2)").
+    the top 3 (a reference matches the clause itself or any of its parts, so
+    "EU261 Art. 9" matches "EU261 Art. 9 (part 1 of 2)" but "KQ CoC Art. 1"
+    does not match "KQ CoC Art. 10").
   * For every candidate tau, the scope guard is scored as a binary classifier
     whose positive class is "answer" (top similarity >= tau). F0.5 weights
     precision over recall: answering an out-of-scope question (the Moffatt
@@ -63,7 +64,9 @@ def scope_metrics(rows: list[dict], tau: float) -> dict:
     precision = tp / (tp + fp) if tp + fp else 0.0
     recall = tp / (tp + fn) if tp + fn else 0.0
     b2 = BETA * BETA
-    f_beta = (1 + b2) * precision * recall / (b2 * precision + recall) if precision + recall else 0.0
+    f_beta = (
+        (1 + b2) * precision * recall / (b2 * precision + recall) if precision + recall else 0.0
+    )
     in_scope = tp + fn
     return {
         "tau": tau,
@@ -79,16 +82,21 @@ def scope_metrics(rows: list[dict], tau: float) -> dict:
     }
 
 
+def ref_matches(ref: str, expected: str) -> bool:
+    """'EU261 Art. 9' matches 'EU261 Art. 9' and 'EU261 Art. 9 (part 1 of 2)',
+    but 'KQ CoC Art. 1' must not match 'KQ CoC Art. 10'."""
+    return ref == expected or ref.startswith(expected + " ")
+
+
+def hit_at_k(row: dict) -> bool:
+    return any(ref_matches(ref, exp) for ref in row["refs"] for exp in row["expected_refs"])
+
+
 def recall_at_k(rows: list[dict]) -> float:
     scored = [r for r in rows if r["in_scope"] and r["expected_refs"]]
     if not scored:
         return 0.0
-    hits = sum(
-        1
-        for r in scored
-        if any(ref.startswith(exp) for ref in r["refs"] for exp in r["expected_refs"])
-    )
-    return hits / len(scored)
+    return sum(1 for r in scored if hit_at_k(r)) / len(scored)
 
 
 async def main() -> int:
@@ -124,10 +132,13 @@ async def main() -> int:
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     with (OUT_DIR / "retrieval-evaluation-scores.csv").open("w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["question_id", "split", "in_scope", "top_similarity", "top3_refs", "top3_sims"])
+        w.writerow(["question_id", "split", "in_scope", "topic", "top_similarity", "hit_at_3",
+                    "top3_refs", "top3_sims", "question"])  # fmt: skip
         for r in rows:
-            w.writerow([r["question_id"], r["split"], int(r["in_scope"]), f"{r['top']:.4f}",
-                        " | ".join(r["refs"]), " | ".join(map(str, r["sims"]))])  # fmt: skip
+            hit = int(hit_at_k(r)) if r["in_scope"] else ""
+            w.writerow([r["question_id"], r["split"], int(r["in_scope"]), r.get("topic", ""),
+                        f"{r['top']:.4f}", hit, " | ".join(r["refs"]),
+                        " | ".join(map(str, r["sims"])), r["question"]])  # fmt: skip
 
     def line(m: dict) -> str:
         return (f"| {m['tau']:.2f} | {m['precision']:.3f} | {m['recall']:.3f} | {m['f0_5']:.3f} | "
