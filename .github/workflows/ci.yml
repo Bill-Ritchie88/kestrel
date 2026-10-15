@@ -42,3 +42,21 @@ jobs:
       # No DATABASE_URL is configured, so tests marked `integration` skip
       # themselves. The unit suite must pass without any credentials.
       - run: pytest -v
+
+  client:
+    name: Web client (Flutter)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      # Proves the web build compiles; the output is not published.
+      - run: flutter build web --release

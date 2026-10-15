@@ -7,6 +7,7 @@ import '../theme.dart';
 import '../widgets/api_error.dart';
 import '../widgets/cards.dart';
 import '../widgets/common.dart';
+import '../widgets/layout.dart';
 import 'confirm_screen.dart';
 import 'handoff_screen.dart';
 
@@ -79,55 +80,70 @@ class _AlternativesScreenState extends State<AlternativesScreen> {
       appBar: AppBar(title: const Text('Other flights')),
       body: RefreshIndicator(
         onRefresh: _load,
-        child: ListView(
-          padding: const EdgeInsets.all(K.s4),
-          children: [
-            if (f != null) ...[
-              Text('${city(f.origin)} to ${city(f.destination)}', style: t.headlineSmall),
-              const SizedBox(height: K.s1),
-              Text(
-                'Same cabin (${titleCase(booking!.cabin)}), earliest arrival first. '
-                'All times are local to each airport.',
-                style: t.bodySmall?.copyWith(color: K.textSecondary),
-              ),
-              const SizedBox(height: K.s4),
-            ],
-            if (_loading && _flights == null)
-              Padding(
-                padding: const EdgeInsets.all(K.s6),
-                child: Center(
-                  child: Semantics(
-                      label: 'Loading flights', child: const CircularProgressIndicator()),
+        // Two cards per row in a desktop browser, one on a phone.
+        child: LayoutBuilder(builder: (context, c) {
+          final columns = c.maxWidth >= Breakpoints.twoColumn ? 2 : 1;
+          final padding = pagePadding(
+            c.maxWidth,
+            maxWidth: columns == 2 ? Breakpoints.grid : Breakpoints.readable,
+          );
+          final cardWidth = (c.maxWidth - padding.horizontal - (columns - 1) * K.s3) / columns;
+          return ListView(
+            padding: padding,
+            children: [
+              if (f != null) ...[
+                Text('${city(f.origin)} to ${city(f.destination)}', style: t.headlineSmall),
+                const SizedBox(height: K.s1),
+                Text(
+                  'Same cabin (${titleCase(booking!.cabin)}), earliest arrival first. '
+                  'All times are local to each airport.',
+                  style: t.bodySmall?.copyWith(color: K.textSecondary),
                 ),
-              ),
-            if (_error != null) ErrorNotice(message: _error!, onRetry: _load),
-            if (_flights != null && _flights!.isEmpty) ...[
-              KCard(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('No seats on other flights', style: t.titleMedium),
-                  const SizedBox(height: K.s2),
-                  Text(
-                    'There are no free seats in your cabin on this route right now. '
-                    'A Kenya Airways agent can look at other options with you.',
-                    style: t.bodyMedium?.copyWith(color: K.textSecondary),
-                  ),
-                ]),
-              ),
-              const SizedBox(height: K.s4),
-              PrimaryButton(label: 'Talk to a person', onPressed: _askPerson),
-            ],
-            if (_flights != null)
-              for (final (i, flight) in _flights!.indexed)
+                const SizedBox(height: K.s4),
+              ],
+              if (_loading && _flights == null)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: K.s3),
-                  child: FlightOptionCard(
-                    flight: flight,
-                    recommended: i == 0,
-                    onSelect: () => _choose(flight),
+                  padding: const EdgeInsets.all(K.s6),
+                  child: Center(
+                    child: Semantics(
+                        label: 'Loading flights', child: const CircularProgressIndicator()),
                   ),
                 ),
-          ],
-        ),
+              if (_error != null) ErrorNotice(message: _error!, onRetry: _load),
+              if (_flights != null && _flights!.isEmpty) ...[
+                KCard(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('No seats on other flights', style: t.titleMedium),
+                    const SizedBox(height: K.s2),
+                    Text(
+                      'There are no free seats in your cabin on this route right now. '
+                      'A Kenya Airways agent can look at other options with you.',
+                      style: t.bodyMedium?.copyWith(color: K.textSecondary),
+                    ),
+                  ]),
+                ),
+                const SizedBox(height: K.s4),
+                PrimaryButton(label: 'Talk to a person', onPressed: _askPerson),
+              ],
+              if (_flights != null)
+                Wrap(
+                  spacing: K.s3,
+                  runSpacing: K.s3,
+                  children: [
+                    for (final (i, flight) in _flights!.indexed)
+                      SizedBox(
+                        width: cardWidth,
+                        child: FlightOptionCard(
+                          flight: flight,
+                          recommended: i == 0,
+                          onSelect: () => _choose(flight),
+                        ),
+                      ),
+                  ],
+                ),
+            ],
+          );
+        }),
       ),
     );
   }

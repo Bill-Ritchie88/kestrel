@@ -404,8 +404,9 @@ class ChatBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
+    // Bubbles take at most 80% of the conversation column (not of the
+    // browser window), so lines stay readable on a wide screen.
     final bubble = Container(
-      constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * .78),
       padding: const EdgeInsets.symmetric(horizontal: K.s4, vertical: K.s3),
       decoration: BoxDecoration(
         color: fromUser ? K.crimson600 : K.elevated,
@@ -421,13 +422,20 @@ class ChatBubble extends StatelessWidget {
     );
     return Semantics(
       label: fromUser ? 'You said' : 'Kestrel said',
-      child: Row(
-        mainAxisAlignment: fromUser ? MainAxisAlignment.end : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          if (!fromUser) ...[const KestrelMark(size: 28), const SizedBox(width: K.s2)],
-          Flexible(child: bubble),
-        ],
+      child: LayoutBuilder(
+        builder: (context, c) => Row(
+          mainAxisAlignment: fromUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            if (!fromUser) ...[const KestrelMark(size: 28), const SizedBox(width: K.s2)],
+            Flexible(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: c.maxWidth * .8),
+                child: bubble,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

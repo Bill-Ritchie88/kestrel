@@ -13,7 +13,11 @@ coverage/
 # (see README) and are not part of the source.
 android/
 ios/
-web/
+web/*
+!web/index.html
+!web/manifest.json
+!web/favicon.png
+!web/icons/
 windows/
 linux/
 macos/

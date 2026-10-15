@@ -8,6 +8,7 @@ import '../theme.dart';
 import '../widgets/api_error.dart';
 import '../widgets/cards.dart';
 import '../widgets/common.dart';
+import '../widgets/layout.dart';
 import 'vouchers_screen.dart';
 
 /// M11 · Confirm rebooking (UC4, FR-03). The seat is claimed by the atomic
@@ -64,8 +65,7 @@ class _ConfirmScreenState extends State<ConfirmScreen> {
     final f = widget.flight;
     return Scaffold(
       appBar: AppBar(title: const Text('Confirm your new flight')),
-      body: ListView(
-        padding: const EdgeInsets.all(K.s4),
+      body: PageList(
         children: [
           if (booking != null) ...[
             const SectionLabel('Cancelled'),
@@ -149,8 +149,7 @@ class ConfirmedScreen extends StatelessWidget {
         .toList();
     return Scaffold(
       appBar: AppBar(automaticallyImplyLeading: false, title: const Text('Rebooked')),
-      body: ListView(
-        padding: const EdgeInsets.all(K.s4),
+      body: PageList(
         children: [
           Semantics(
             liveRegion: true,

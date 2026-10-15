@@ -6,6 +6,7 @@ import '../theme.dart';
 import '../widgets/api_error.dart';
 import '../widgets/cards.dart';
 import '../widgets/common.dart';
+import '../widgets/layout.dart';
 
 /// M13 / M14 · Entitlements and vouchers (FR-04). Every amount comes from the
 /// deterministic rules engine on the server; the client only displays it.
@@ -58,8 +59,7 @@ class _VouchersScreenState extends State<VouchersScreen> {
       appBar: AppBar(title: const Text('Vouchers & entitlements')),
       body: RefreshIndicator(
         onRefresh: _load,
-        child: ListView(
-          padding: const EdgeInsets.all(K.s4),
+        child: PageList(
           children: [
             if (_loading && _decision == null)
               const Padding(

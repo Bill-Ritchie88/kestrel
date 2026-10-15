@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
@@ -9,6 +10,7 @@ import '../theme.dart';
 import '../widgets/api_error.dart';
 import '../widgets/cards.dart';
 import '../widgets/common.dart';
+import '../widgets/layout.dart';
 import 'alternatives_screen.dart';
 import 'confirm_screen.dart';
 import 'handoff_screen.dart';
@@ -57,7 +59,9 @@ const _quickReplies = [
 class _ChatScreenState extends State<ChatScreen> {
   final _messages = <_Message>[];
   final _input = TextEditingController();
-  final _inputFocus = FocusNode();
+  // Enter sends, Shift+Enter starts a new line - what people expect from a
+  // chat box in a browser.
+  late final _inputFocus = FocusNode(onKeyEvent: _onComposerKey);
   final _scroll = ScrollController();
   final _speech = SpeechToText();
   bool _busy = false;
@@ -124,11 +128,25 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  KeyEventResult _onComposerKey(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent &&
+        (event.logicalKey == LogicalKeyboardKey.enter ||
+            event.logicalKey == LogicalKeyboardKey.numpadEnter) &&
+        !HardwareKeyboard.instance.isShiftPressed) {
+      _send();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
   Future<void> _send([String? preset]) async {
     final text = (preset ?? _input.text).trim();
     if (text.isEmpty || _busy) return;
-    if (_listening) await _speech.stop();
+    // Read the session before any await, so no BuildContext crosses an
+    // async gap.
     final session = SessionScope.read(context);
+    if (_listening) await _speech.stop();
+    if (!mounted) return;
     final history = _history();
     setState(() {
       _messages.add(_Message.user(text));
@@ -315,94 +333,215 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     final booking = SessionScope.of(context).booking;
-    return Scaffold(
-      appBar: AppBar(
-        titleSpacing: K.s4,
-        title: const Row(children: [
-          KestrelMark(size: 32),
-          SizedBox(width: K.s3),
-          Text('Kestrel'),
-        ]),
-        actions: [
-          IconButton(
-            tooltip: 'Other flights',
-            icon: const Icon(Icons.flight_takeoff),
-            onPressed: () => _open(const AlternativesScreen()),
-          ),
-          IconButton(
-            tooltip: 'Vouchers',
-            icon: const Icon(Icons.card_giftcard),
-            onPressed: () => _open(const VouchersScreen()),
-          ),
-          PopupMenuButton<String>(
-            tooltip: 'More',
-            onSelected: (v) {
-              if (v == 'person') {
-                _talkToPerson();
-              } else {
-                _signOut();
-              }
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'person', child: Text('Talk to a person')),
-              PopupMenuItem(value: 'signout', child: Text('Sign out')),
+    return LayoutBuilder(builder: (context, c) {
+      // In a desktop browser the booking and the actions sit in a side panel
+      // next to the conversation; on a phone they move into the app bar and
+      // the top of the conversation.
+      final wide = c.maxWidth >= Breakpoints.wide;
+      final conversation = _conversation(booking, showBooking: !wide, autofocus: wide);
+      return Scaffold(
+        appBar: AppBar(
+          titleSpacing: K.s4,
+          title: const Row(children: [
+            KestrelMark(size: 32),
+            SizedBox(width: K.s3),
+            Text('Kestrel'),
+          ]),
+          actions: wide
+              ? null
+              : [
+                  IconButton(
+                    tooltip: 'Other flights',
+                    icon: const Icon(Icons.flight_takeoff),
+                    onPressed: () => _open(const AlternativesScreen()),
+                  ),
+                  IconButton(
+                    tooltip: 'Vouchers',
+                    icon: const Icon(Icons.card_giftcard),
+                    onPressed: () => _open(const VouchersScreen()),
+                  ),
+                  PopupMenuButton<String>(
+                    tooltip: 'More',
+                    onSelected: (v) {
+                      if (v == 'person') {
+                        _talkToPerson();
+                      } else {
+                        _signOut();
+                      }
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(value: 'person', child: Text('Talk to a person')),
+                      PopupMenuItem(value: 'signout', child: Text('Sign out')),
+                    ],
+                  ),
+                ],
+        ),
+        body: SafeArea(
+          child: wide
+              ? Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  SizedBox(
+                    width: 380,
+                    child: _SidePanel(
+                      booking: booking,
+                      busy: _busy,
+                      onFlights: () => _open(const AlternativesScreen()),
+                      onVouchers: () => _open(const VouchersScreen()),
+                      onPerson: _talkToPerson,
+                      onSignOut: _signOut,
+                    ),
+                  ),
+                  const VerticalDivider(width: 1, color: K.hairline),
+                  Expanded(child: conversation),
+                ])
+              : conversation,
+        ),
+      );
+    });
+  }
+
+  Widget _conversation(Booking? booking, {required bool showBooking, required bool autofocus}) {
+    return LayoutBuilder(builder: (context, c) {
+      final padding = pagePadding(c.maxWidth, maxWidth: Breakpoints.chat, top: K.s2);
+      return Column(children: [
+        Expanded(
+          child: ListView(
+            controller: _scroll,
+            padding: padding,
+            children: [
+              if (showBooking && booking != null) BookingCard(booking: booking),
+              for (final (i, m) in _messages.indexed)
+                Padding(
+                  padding: EdgeInsets.only(top: i == 0 && !showBooking ? 0 : K.s4),
+                  child: _messageView(m),
+                ),
+              if (_busy)
+                const Padding(padding: EdgeInsets.only(top: K.s4), child: ThinkingBubble()),
             ],
           ),
-        ],
-      ),
-      body: SafeArea(
-        child: Column(children: [
-          Expanded(
+        ),
+        if (!_busy && _messages.length <= 1)
+          SizedBox(
+            height: K.touch + K.s2,
             child: ListView(
-              controller: _scroll,
-              padding: const EdgeInsets.fromLTRB(K.s4, K.s2, K.s4, K.s4),
+              scrollDirection: Axis.horizontal,
+              padding: EdgeInsets.symmetric(horizontal: padding.left),
               children: [
-                if (booking != null) BookingCard(booking: booking),
-                for (final m in _messages)
-                  Padding(padding: const EdgeInsets.only(top: K.s4), child: _messageView(m)),
-                if (_busy)
-                  const Padding(padding: EdgeInsets.only(top: K.s4), child: ThinkingBubble()),
+                for (final q in _quickReplies)
+                  Padding(
+                    padding: const EdgeInsets.only(right: K.s2),
+                    child: ActionChip(
+                      label: Text(q),
+                      onPressed: () => _send(q),
+                      backgroundColor: K.surface,
+                      side: const BorderSide(color: K.crimsonStroke),
+                      materialTapTargetSize: MaterialTapTargetSize.padded,
+                    ),
+                  ),
+                ActionChip(
+                  avatar: const Icon(Icons.support_agent, size: 18),
+                  label: const Text('Talk to a person'),
+                  onPressed: _talkToPerson,
+                  backgroundColor: K.surface,
+                  side: const BorderSide(color: K.hairline),
+                  materialTapTargetSize: MaterialTapTargetSize.padded,
+                ),
               ],
             ),
           ),
-          if (!_busy && _messages.length <= 1)
-            SizedBox(
-              height: K.touch + K.s2,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: K.s4),
-                children: [
-                  for (final q in _quickReplies)
-                    Padding(
-                      padding: const EdgeInsets.only(right: K.s2),
-                      child: ActionChip(
-                        label: Text(q),
-                        onPressed: () => _send(q),
-                        backgroundColor: K.surface,
-                        side: const BorderSide(color: K.crimsonStroke),
-                        materialTapTargetSize: MaterialTapTargetSize.padded,
-                      ),
-                    ),
-                  ActionChip(
-                    avatar: const Icon(Icons.support_agent, size: 18),
-                    label: const Text('Talk to a person'),
-                    onPressed: _talkToPerson,
-                    backgroundColor: K.surface,
-                    side: const BorderSide(color: K.hairline),
-                    materialTapTargetSize: MaterialTapTargetSize.padded,
-                  ),
-                ],
+        DecoratedBox(
+          decoration: const BoxDecoration(
+            color: K.base,
+            border: Border(top: BorderSide(color: K.hairline)),
+          ),
+          child: CentredBar(
+            maxWidth: Breakpoints.chat + 2 * K.s4,
+            child: _Composer(
+              controller: _input,
+              focusNode: _inputFocus,
+              busy: _busy,
+              listening: _listening,
+              autofocus: autofocus,
+              onSend: _send,
+              onMic: _toggleMic,
+            ),
+          ),
+        ),
+      ]);
+    });
+  }
+}
+
+/// Desktop side panel: the passenger's booking and every action one click
+/// away, so the conversation column can stay at a readable width.
+class _SidePanel extends StatelessWidget {
+  const _SidePanel({
+    required this.booking,
+    required this.busy,
+    required this.onFlights,
+    required this.onVouchers,
+    required this.onPerson,
+    required this.onSignOut,
+  });
+  final Booking? booking;
+  final bool busy;
+  final VoidCallback onFlights, onVouchers, onPerson, onSignOut;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    return ColoredBox(
+      color: K.void_,
+      child: ListView(
+        padding: const EdgeInsets.all(K.s5),
+        children: [
+          const SectionLabel('Your booking'),
+          const SizedBox(height: K.s3),
+          if (booking != null) BookingCard(booking: booking!),
+          const SizedBox(height: K.s5),
+          const SectionLabel('What you can do'),
+          const SizedBox(height: K.s3),
+          SecondaryButton(
+            label: 'See other flights',
+            icon: Icons.flight_takeoff,
+            onPressed: onFlights,
+          ),
+          const SizedBox(height: K.s3),
+          SecondaryButton(
+            label: 'Vouchers & entitlements',
+            icon: Icons.card_giftcard,
+            onPressed: onVouchers,
+          ),
+          const SizedBox(height: K.s3),
+          SecondaryButton(
+            label: 'Talk to a person',
+            icon: Icons.support_agent,
+            onPressed: busy ? null : onPerson,
+          ),
+          const SizedBox(height: K.s5),
+          Row(children: [
+            const Icon(Icons.lock_outline, size: 16, color: K.textSecondary),
+            const SizedBox(width: K.s2),
+            Expanded(
+              child: Text(
+                'Your session ends 15 minutes after sign-in. Nothing is saved in this browser.',
+                style: t.bodySmall?.copyWith(color: K.textSecondary),
               ),
             ),
-          _Composer(
-            controller: _input,
-            focusNode: _inputFocus,
-            busy: _busy,
-            listening: _listening,
-            onSend: _send,
-            onMic: _toggleMic,
+          ]),
+          const SizedBox(height: K.s2),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: onSignOut,
+              icon: const Icon(Icons.logout, size: 18),
+              label: const Text('Sign out'),
+              style: TextButton.styleFrom(
+                foregroundColor: K.textSecondary,
+                minimumSize: const Size(K.touch, K.touch),
+              ),
+            ),
           ),
-        ]),
+        ],
       ),
     );
   }
@@ -436,21 +575,18 @@ class _Composer extends StatelessWidget {
     required this.listening,
     required this.onSend,
     required this.onMic,
+    this.autofocus = false,
   });
   final TextEditingController controller;
   final FocusNode focusNode;
-  final bool busy, listening;
+  final bool busy, listening, autofocus;
   final Future<void> Function([String?]) onSend;
   final VoidCallback onMic;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return Padding(
       padding: const EdgeInsets.fromLTRB(K.s3, K.s2, K.s3, K.s3),
-      decoration: const BoxDecoration(
-        color: K.base,
-        border: Border(top: BorderSide(color: K.hairline)),
-      ),
       child: Row(children: [
         IconButton(
           tooltip: listening ? 'Stop dictation' : 'Speak your question',
@@ -465,13 +601,19 @@ class _Composer extends StatelessWidget {
             controller: controller,
             focusNode: focusNode,
             enabled: !busy,
+            autofocus: autofocus,
             minLines: 1,
             maxLines: 4,
             maxLength: 1000,
             textInputAction: TextInputAction.send,
             onSubmitted: (_) => onSend(),
             decoration: InputDecoration(
-              hintText: listening ? 'Listening…' : 'Ask about your flight…',
+              hintText: listening
+                  ? 'Listening…'
+                  : autofocus
+                      ? 'Ask about your flight…   Enter to send · Shift+Enter for a new line'
+                      : 'Ask about your flight…',
+              hintMaxLines: 1,
               counterText: '',
               contentPadding: const EdgeInsets.symmetric(horizontal: K.s4, vertical: 14),
             ),

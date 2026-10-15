@@ -6,6 +6,7 @@ import '../theme.dart';
 import '../widgets/api_error.dart';
 import '../widgets/cards.dart';
 import '../widgets/common.dart';
+import '../widgets/layout.dart';
 
 /// M15 · Hand-off to a person (FR-05). The case already holds the booking and
 /// the reason, so the passenger does not have to start again with the agent.
@@ -48,8 +49,7 @@ class _HandoffScreenState extends State<HandoffScreen> {
         .toList();
     return Scaffold(
       appBar: AppBar(title: const Text('Talk to a person')),
-      body: ListView(
-        padding: const EdgeInsets.all(K.s4),
+      body: PageList(
         children: [
           if (current != null) ...[
             Semantics(

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!--
+    $FLUTTER_BASE_HREF is replaced by `flutter build web --base-href /path/`.
+    Leave it as "/" when the app is served from the site root.
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Kestrel helps Kenya Airways passengers whose flight was cancelled: rebook, see your vouchers and entitlements, or reach a person.">
+  <meta name="theme-color" content="#0A0A0F">
+  <meta name="color-scheme" content="dark">
+
+  <!-- Installable on phones (home-screen web app) -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Kestrel">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <link rel="icon" type="image/png" href="favicon.png">
+  <title>Kestrel · Kenya Airways</title>
+  <link rel="manifest" href="manifest.json">
+
+  <style>
+    /* Dark from the first paint, so the page never flashes white while
+       Flutter loads. */
+    html, body { margin: 0; height: 100%; background: #060608; }
+    #loading {
+      position: fixed; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 16px;
+      color: #A0A4B2; font: 500 15px/1.4 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+      transition: opacity 240ms ease-out;
+    }
+    #loading .mark {
+      width: 56px; height: 56px; border-radius: 50%;
+      background: linear-gradient(135deg, #D81B3C, #A81030);
+      box-shadow: 0 0 24px rgba(255, 46, 85, .4);
+      animation: breathe 1.4s ease-in-out infinite alternate;
+    }
+    #loading.done { opacity: 0; pointer-events: none; }
+    @keyframes breathe { from { transform: scale(1); } to { transform: scale(1.08); } }
+    @media (prefers-reduced-motion: reduce) { #loading .mark { animation: none; } }
+  </style>
+</head>
+<body>
+  <div id="loading" role="status" aria-live="polite">
+    <div class="mark" aria-hidden="true"></div>
+    <div>Loading Kestrel…</div>
+  </div>
+  <noscript>
+    <p style="color:#F2F3F7;font-family:system-ui,sans-serif;text-align:center;margin-top:40vh">
+      Kestrel needs JavaScript. Please enable it and reload the page.
+    </p>
+  </noscript>
+  <script>
+    // Flutter dispatches this event when the first frame is on screen.
+    window.addEventListener('flutter-first-frame', function () {
+      var el = document.getElementById('loading');
+      if (!el) return;
+      el.classList.add('done');
+      setTimeout(function () { el.remove(); }, 300);
+    });
+  </script>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>

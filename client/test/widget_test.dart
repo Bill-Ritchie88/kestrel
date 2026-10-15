@@ -47,8 +47,34 @@ http.Client _backend({bool acceptLogin = true}) => MockClient((req) async {
       return http.Response('{}', 404);
     });
 
-Future<void> _pump(WidgetTester tester, http.Client client) async {
+/// Screen sizes the client is built for (logical pixels): a common Android
+/// phone and a laptop browser window. The default 800 x 600 test window is
+/// neither, and is shorter than the sign-in form.
+const phone = Size(412, 915);
+const laptop = Size(1440, 900);
+
+Future<void> _pump(WidgetTester tester, http.Client client, {Size screen = phone}) async {
+  tester.view.devicePixelRatio = 1;
+  tester.view.physicalSize = screen;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
   await tester.pumpWidget(KestrelApp(session: Session(api: KestrelApi(client: client))));
+  await tester.pumpAndSettle();
+}
+
+/// Scrolls the sign-in button into view, as a passenger would, then taps it.
+Future<void> _tapFindBooking(WidgetTester tester) async {
+  final button = find.text('Find my booking');
+  await tester.ensureVisible(button);
+  await tester.pumpAndSettle();
+  await tester.tap(button);
+}
+
+Future<void> _signIn(WidgetTester tester, {Size screen = phone}) async {
+  await _pump(tester, _backend(), screen: screen);
+  await tester.enterText(find.byType(TextFormField).at(0), 'a27z99');
+  await tester.enterText(find.byType(TextFormField).at(1), 'Edwards');
+  await _tapFindBooking(tester);
   await tester.pumpAndSettle();
 }
 
@@ -71,7 +97,7 @@ void main() {
       calls++;
       return http.Response('{}', 500);
     }));
-    await tester.tap(find.text('Find my booking'));
+    await _tapFindBooking(tester);
     await tester.pumpAndSettle();
     expect(find.text('Enter your 6-character booking reference.'), findsOneWidget);
     expect(calls, 0);
@@ -81,24 +107,39 @@ void main() {
     await _pump(tester, _backend(acceptLogin: false));
     await tester.enterText(find.byType(TextFormField).at(0), 'a27z99');
     await tester.enterText(find.byType(TextFormField).at(1), 'Wrong');
-    await tester.tap(find.text('Find my booking'));
+    await _tapFindBooking(tester);
     await tester.pumpAndSettle();
     expect(find.text('No booking matches that PNR and surname.'), findsOneWidget);
   });
 
   testWidgets('successful sign-in opens the chat with a greeting from the booking',
       (tester) async {
-    await _pump(tester, _backend());
-    await tester.enterText(find.byType(TextFormField).at(0), 'a27z99');
-    await tester.enterText(find.byType(TextFormField).at(1), 'Edwards');
-    await tester.tap(find.text('Find my booking'));
-    await tester.pumpAndSettle();
+    await _signIn(tester);
 
     expect(find.byType(TextField), findsOneWidget); // the composer
     expect(find.textContaining('Hello Grace'), findsOneWidget);
     expect(find.textContaining('because of weather'), findsWidgets); // greeting + card
     expect(find.text('Talk to a person'), findsOneWidget);
     expect(find.byTooltip('Speak your question'), findsOneWidget);
+  });
+
+  testWidgets('in a laptop browser the chat gets a side panel with the booking and actions',
+      (tester) async {
+    await _signIn(tester, screen: laptop);
+
+    expect(find.text('YOUR BOOKING'), findsOneWidget); // section labels are upper case
+    expect(find.text('Vouchers & entitlements'), findsOneWidget);
+    expect(find.text('See other flights'), findsOneWidget);
+    // The phone app-bar shortcuts are replaced by the panel.
+    expect(find.byTooltip('Vouchers'), findsNothing);
+    expect(find.textContaining('Hello Grace'), findsOneWidget);
+    expect(tester.takeException(), isNull); // no overflow at this size
+  });
+
+  testWidgets('the chat column stays at a readable width on a wide screen', (tester) async {
+    await _signIn(tester, screen: const Size(1920, 1080));
+    final composer = tester.getSize(find.byType(TextField));
+    expect(composer.width, lessThan(800));
   });
 
   testWidgets('touch targets meet the 48 dp minimum on the sign-in screen', (tester) async {
