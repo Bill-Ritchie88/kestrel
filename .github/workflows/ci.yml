@@ -61,6 +61,14 @@ jobs:
       - run: flutter --version
       - run: flutter pub get
       - run: flutter analyze
-      - run: flutter test
+      # On failure, the first lines of each failing test are also raised as
+      # annotations, so they show on the run summary without opening the log.
+      - name: flutter test
+        run: |
+          set -o pipefail
+          if ! flutter test --reporter expanded 2>&1 | tee test.log; then
+            python3 ../scripts/ci_annotate_flutter.py test.log
+            exit 1
+          fi
       # Proves the web build compiles; the output is not published.
       - run: flutter build web --release
