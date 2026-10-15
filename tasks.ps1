@@ -20,6 +20,51 @@ function Invoke-Setup {
     Write-Host "Now: copy .env.example to .env and fill it in" -ForegroundColor Yellow
 }
 
+function Stop-KestrelServices {
+    # uvicorn --reload on Windows runs launcher -> reloader -> worker, and the
+    # worker inherits the listening socket. Stopping only the process that owns
+    # the port leaves the worker serving requests with the old code and .env,
+    # so stop each service's whole tree, plus workers already orphaned that way.
+    $all = @(Get-CimInstance Win32_Process)
+    $alive = @{}; foreach ($p in $all) { $alive[[int]$p.ProcessId] = $true }
+
+    $roots = @($all | Where-Object { $_.CommandLine -match 'uvicorn kestrel\.(api\.main|agent_service):app' } |
+               ForEach-Object { [int]$_.ProcessId })
+    $roots += @(Get-NetTCPConnection -LocalPort 8000, 8001 -State Listen -ErrorAction SilentlyContinue |
+                ForEach-Object { [int]$_.OwningProcess })
+
+    $doomed = @{}
+    $queue = [System.Collections.Generic.Queue[int]]::new()
+    foreach ($id in $roots) { if (-not $doomed[$id]) { $doomed[$id] = $true; $queue.Enqueue($id) } }
+    while ($queue.Count) {
+        $id = $queue.Dequeue()
+        foreach ($c in $all | Where-Object { [int]$_.ParentProcessId -eq $id }) {
+            if (-not $doomed[[int]$c.ProcessId]) { $doomed[[int]$c.ProcessId] = $true; $queue.Enqueue([int]$c.ProcessId) }
+        }
+    }
+
+    # Orphans: multiprocessing workers of this venv's base interpreter whose parent
+    # is gone. Matched on the command line, which starts with the pyvenv.cfg home
+    # (for a Store Python, ExecutablePath is the real package path instead).
+    $home_ = (Get-Content .venv\pyvenv.cfg -ErrorAction SilentlyContinue | Where-Object { $_ -match '^home\s*=' }) -replace '^home\s*=\s*', ''
+    if ($home_) {
+        $prefix = '"' + $home_.Trim().TrimEnd('\') + '\'
+        foreach ($p in $all | Where-Object { $_.CommandLine -match 'spawn_main\(parent_pid=' -and
+                                              $_.CommandLine.StartsWith($prefix, 'OrdinalIgnoreCase') -and
+                                              -not $alive[[int]$_.ParentProcessId] }) {
+            $doomed[[int]$p.ProcessId] = $true
+        }
+    }
+
+    foreach ($id in $doomed.Keys) {
+        if ($alive[$id]) {
+            Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
+            Write-Host "Stopped process $id"
+        }
+    }
+    if (-not $doomed.Count) { Write-Host "No Kestrel services running" }
+}
+
 switch ($Target) {
     "setup"    { Invoke-Setup }
     "lock"     { & $Py -m pip freeze | Out-File -Encoding utf8 requirements.lock.txt
@@ -33,7 +78,9 @@ switch ($Target) {
     "reset"    { & $Py scripts/reset_demo.py }
     "api"      { & $Py -m uvicorn kestrel.api.main:app --reload }
     "agent-api" { & $Py -m uvicorn kestrel.agent_service:app --port 8001 --reload }
-    "up"       { Start-Process powershell -ArgumentList "-NoExit", "-Command", "& '$Py' -m uvicorn kestrel.api.main:app --reload"
+    "down"     { Stop-KestrelServices }
+    "up"       { Stop-KestrelServices
+                 Start-Process powershell -ArgumentList "-NoExit", "-Command", "& '$Py' -m uvicorn kestrel.api.main:app --reload"
                  Start-Process powershell -ArgumentList "-NoExit", "-Command", "& '$Py' -m uvicorn kestrel.agent_service:app --port 8001 --reload"
                  Write-Host "REST tier on :8000, agent service on :8001 (two new windows)" }
     "ingest"   { & $Py scripts/ingest_policies.py }
@@ -57,7 +104,8 @@ switch ($Target) {
             @("reset",    "Reset the demo data to now"),
             @("api",      "Run the REST tier with reload"),
             @("agent-api","Run the agent service (Flutter chat) on :8001"),
-            @("up",       "Start the REST tier and the agent service together"),
+            @("up",       "Restart the REST tier and the agent service together"),
+            @("down",     "Stop both services, including orphaned reload workers"),
             @("ingest",   "Chunk, embed and load the policy corpus"),
             @("evaluate", "Retrieval evaluation and tau calibration"),
             @("loadtest", "Concurrent rebooking test (rolled back)"),
