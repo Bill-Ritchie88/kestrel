@@ -19,7 +19,7 @@ import json
 import os
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException, status
@@ -78,7 +78,7 @@ LOG_DIR = Path(os.getenv("KESTREL_LOG_DIR", Path(__file__).resolve().parents[2] 
 def _log_turn(record: dict) -> None:
     try:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
-        record = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), **record}
+        record = {"at": datetime.now(UTC).isoformat(timespec="seconds"), **record}
         with (LOG_DIR / "agent-turns.jsonl").open("a", encoding="utf-8") as f:
             f.write(json.dumps(record) + "\n")
     except OSError:

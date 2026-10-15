@@ -51,10 +51,14 @@ jobs:
         working-directory: client
     steps:
       - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
+      # Flutter from its official repository, so the workflow needs no
+      # third-party action (the repository only allows GitHub's own).
+      - name: Install Flutter (stable)
+        working-directory: ${{ runner.temp }}
+        run: |
+          git clone --depth 1 --branch stable https://github.com/flutter/flutter.git
+          echo "${{ runner.temp }}/flutter/bin" >> "$GITHUB_PATH"
+      - run: flutter --version
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test

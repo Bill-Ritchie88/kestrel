@@ -5,7 +5,7 @@ Each test pins one rule to the clause it implements, so a change to a rule
 that breaks the Regulation fails here before it reaches a passenger.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
@@ -220,7 +220,7 @@ def test_local_time_uses_the_airports_zone():
     13:21; the passenger's clock says 16:21."""
     from kestrel.entitlements import local_iso
 
-    utc = datetime(2026, 10, 11, 13, 21, tzinfo=timezone.utc)
+    utc = datetime(2026, 10, 11, 13, 21, tzinfo=UTC)
     assert local_iso(utc, "NBO") == "2026-10-11T16:21+03:00"
     assert local_iso(utc, "AMS") == "2026-10-11T15:21+02:00"  # CEST
     assert local_iso(None, "NBO") is None

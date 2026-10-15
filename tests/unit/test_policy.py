@@ -84,7 +84,7 @@ def test_long_articles_are_split_and_every_part_is_bounded():
     chunks = chunk_text(f"ARTICLE 4: LONG\n{body}", KQ)
     assert len(chunks) > 1
     assert all(len(c.content) <= MAX_CHARS + 120 for c in chunks)  # + heading
-    assert chunks[0].clause_ref.endswith("(part 1 of %d)" % len(chunks))
+    assert chunks[0].clause_ref.endswith(f"(part 1 of {len(chunks)})")
     assert len({c.chunk_id for c in chunks}) == len(chunks)
 
 

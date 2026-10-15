@@ -10,7 +10,7 @@ real pool from .env) never runs.
 """
 
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 import pytest
@@ -20,7 +20,7 @@ from kestrel.api import auth, db, main
 from kestrel.api.auth import issue_token
 from kestrel.policy.retriever import PolicyHit, RetrievalResult
 
-NOW = datetime.now(timezone.utc)
+NOW = datetime.now(UTC)
 
 
 class FakeConn:

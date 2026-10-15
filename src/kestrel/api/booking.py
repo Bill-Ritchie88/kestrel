@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import secrets
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from kestrel.entitlements import (
     STORABLE_TYPES,
@@ -178,7 +178,7 @@ def context_from_booking(row, now: datetime | None = None) -> DisruptionContext:
         disruption_reason=row["disruption_reason"],
         new_departure=row["current_departure"],
         new_arrival=row["current_arrival"],
-        now=now or datetime.now(timezone.utc),
+        now=now or datetime.now(UTC),
     )
 
 
