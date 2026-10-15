@@ -419,23 +419,22 @@ class _ChatScreenState extends State<ChatScreen> {
             ],
           ),
         ),
+        // Quick replies wrap onto a second line rather than scrolling
+        // sideways, so "Talk to a person" is never hidden off-screen.
         if (!_busy && _messages.length <= 1)
-          SizedBox(
-            height: K.touch + K.s2,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: EdgeInsets.symmetric(horizontal: padding.left),
+          Padding(
+            padding: EdgeInsets.fromLTRB(padding.left, 0, padding.right, K.s2),
+            child: Wrap(
+              spacing: K.s2,
+              runSpacing: K.s2,
               children: [
                 for (final q in _quickReplies)
-                  Padding(
-                    padding: const EdgeInsets.only(right: K.s2),
-                    child: ActionChip(
-                      label: Text(q),
-                      onPressed: () => _send(q),
-                      backgroundColor: K.surface,
-                      side: const BorderSide(color: K.crimsonStroke),
-                      materialTapTargetSize: MaterialTapTargetSize.padded,
-                    ),
+                  ActionChip(
+                    label: Text(q),
+                    onPressed: () => _send(q),
+                    backgroundColor: K.surface,
+                    side: const BorderSide(color: K.crimsonStroke),
+                    materialTapTargetSize: MaterialTapTargetSize.padded,
                   ),
                 ActionChip(
                   avatar: const Icon(Icons.support_agent, size: 18),
