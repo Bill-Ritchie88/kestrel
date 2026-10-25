@@ -20,6 +20,9 @@ integrity · NFR-04 retrieval accuracy.
 | [sprint-2/performance/4-recommendations-suggestions-memory.md](sprint-2/performance/4-recommendations-suggestions-memory.md) | Phase 4: "Why this flight?", suggestions and conversation memory | 2 | NFR-01, NFR-02 |
 | [sprint-2/ai-code-review/review-tools-evaluation.md](sprint-2/ai-code-review/review-tools-evaluation.md) | Evaluation of the AI code-review tools run on Kestrel (18 October 2026) | 2 | NFR-03 |
 | [sprint-2/ai-code-review/issues-found-and-fixed.md](sprint-2/ai-code-review/issues-found-and-fixed.md) | The issues those reviews found and how each was fixed | 2 | FR-01, FR-03, FR-04, FR-05, NFR-03 |
+| [sprint-2/03-retrieval-evaluation.md](sprint-2/03-retrieval-evaluation.md) | Retrieval evaluation and tau calibration on the labelled question set, with [per-question scores](sprint-2/03-retrieval-evaluation-scores.csv) | 2 | NFR-04, FR-05 |
+| [traceability.md](traceability.md) | Every requirement mapped to code, test, result and evidence | 3 | All |
+| [sprint-3/00-status.md](sprint-3/00-status.md) | Sprint III status: remaining build work checked against the code, gaps and owner actions | 3 | All |
 | [design/assistant-intelligence-features.md](design/assistant-intelligence-features.md) | Design of the assistant's recommendations, explanations, suggestions and frustration hand-off | 2 | FR-03, FR-05, FR-08 |
 | [design/database-connection-pool.md](design/database-connection-pool.md) | How the REST tier's database connection pool is sized and kept warm | 2 | NFR-01, NFR-02 |
 | [future-work/ml-disruption-prediction.md](future-work/ml-disruption-prediction.md) | Proposal: a supervised model that predicts flight disruption (pending approval) | Future | — |
