@@ -126,3 +126,21 @@ class TestLoginThrottling:
             lambda: real_time() + auth.THROTTLE_WINDOW_SECONDS + 1,
         )
         assert auth.is_throttled("S958PC") is False
+
+
+def test_the_login_limit_dictionary_does_not_keep_every_guess(monkeypatch):
+    """Issue #36: a key with no recent attempt is dropped; checking a booking
+    stores nothing."""
+    from kestrel.api import auth
+
+    auth._failed_attempts.clear()
+    for i in range(50):
+        auth.is_throttled(f"NOPE{i:02d}")
+    assert auth._failed_attempts == {}
+    monkeypatch.setattr(auth, "_SWEEP_ABOVE", 10)
+    old = __import__("time").time() - auth.THROTTLE_WINDOW_SECONDS - 1
+    for i in range(10):
+        auth._failed_attempts[f"OLD{i}"] = [old]
+    auth.register_failed_attempt("NEW001")
+    assert set(auth._failed_attempts) == {"NEW001"}
+    auth._failed_attempts.clear()

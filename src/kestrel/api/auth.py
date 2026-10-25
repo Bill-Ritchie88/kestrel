@@ -159,6 +159,9 @@ async def current_passenger(
 # ---------------------------------------------------------------------------
 
 _failed_attempts: dict[str, list[float]] = {}
+# Above this many keys, keys with no recent attempt are dropped (issue #36):
+# every wrong booking reference used to stay in memory for good.
+_SWEEP_ABOVE = 10_000
 
 
 def _normalize(pnr_code: str) -> str:
@@ -167,8 +170,16 @@ def _normalize(pnr_code: str) -> str:
 
 def _recent_attempts(key: str, now: float) -> list[float]:
     attempts = [t for t in _failed_attempts.get(key, []) if now - t < THROTTLE_WINDOW_SECONDS]
-    _failed_attempts[key] = attempts
+    if attempts:
+        _failed_attempts[key] = attempts
+    else:
+        _failed_attempts.pop(key, None)
     return attempts
+
+
+def _sweep(now: float) -> None:
+    for key in [k for k, ts in _failed_attempts.items() if not ts or now - ts[-1] >= THROTTLE_WINDOW_SECONDS]:
+        del _failed_attempts[key]
 
 
 def register_failed_attempt(pnr_code: str) -> None:
@@ -177,6 +188,8 @@ def register_failed_attempt(pnr_code: str) -> None:
     attempts = _recent_attempts(key, now)
     attempts.append(now)
     _failed_attempts[key] = attempts
+    if len(_failed_attempts) > _SWEEP_ABOVE:
+        _sweep(now)
 
 
 def is_throttled(pnr_code: str) -> bool:
