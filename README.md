@@ -19,23 +19,30 @@ tier.
 ## Architecture
 
 ```
-Flutter client  ->  FastAPI REST tier  ->  PostgreSQL (Supabase)
-  (Sprint 3)          kestrel.api.main      reaccommodate_passenger_atomic
-                      kestrel.api.auth      row-level locks, audit_logs
-                         ^
-                         |  HTTP only, no DB credentials
-                   Agent tier
-                   kestrel.agent  ->  Gemini (LangChain, bounded tool loop)
+Flutter web client  ->  REST tier (FastAPI, :8000)  ->  PostgreSQL (Supabase)
+ client/                 kestrel.api.main              reaccommodate_passenger_atomic
+ Home, Help, sign-in,    sign-in, trip, rebooking,     row-level locks, audit_logs
+ passenger app,          vouchers, policy search,      pgvector policy clauses
+ staff desk              hand-off cases, staff queue
+        |                        ^
+        |  chat (SSE)            |  HTTP only, the passenger's own token
+        v                        |
+ Agent service (:8001)  ---------+
+ kestrel.agent_service  ->  Gemini (bounded tool loop, no database credentials)
 ```
 
-| Tier | File | Responsibility |
+The AI decides; the code enforces. The model only proposes a flight or a
+question; the stored procedure decides whether a rebooking is allowed (same
+route, same cabin, a disrupted booking, a free seat) and the entitlement rules
+in `kestrel.entitlements` decide what the passenger gets.
+
+| Part | Where | Responsibility |
 |---|---|---|
-| REST | `src/kestrel/api/main.py` | Endpoints, request validation, connection pool |
-| Auth | `src/kestrel/api/auth.py` | PNR + surname login, HMAC session tokens, login throttling |
-| Agent | `src/kestrel/agent.py` | Bounded tool-calling loop; three tools, no DB access |
-| Config | `src/kestrel/config.py` | Loads `.env` once, before any module reads the environment |
-| Data | `db/` | Numbered migrations and the demo reset script |
-| Test data | `scripts/dataset_generator.py` | Synthetic network, passengers, bookings, disruption |
+| Client | `client/` | Home, Help, sign-in (Google, emailed code, booking reference, staff key), the passenger app (My trip, Assistant, Flights, Vouchers, Help) and the staff desk. See `client/README.md`. |
+| REST tier | `src/kestrel/api/` | Endpoints, session tokens and login limits (`auth.py`), account sign-in (`accounts.py`), booking and vouchers (`booking.py`), flight reasons (`explain.py`), conversation memory (`history.py`) |
+| Agent service | `src/kestrel/agent_service.py`, `agent.py` | Chat turns, streamed; quick replies without the model; frustration hand-off (`frustration.py`) |
+| Rules | `src/kestrel/entitlements.py`, `handoff.py`, `policy/` | Entitlements, hand-off cases, policy retrieval |
+| Database | `db/migrations/` | Numbered migrations 000-012 |
 
 ---
 
@@ -79,6 +86,9 @@ list. `.env` is ignored by Git and must never be committed.
 | `SESSION_SECRET` | `kestrel.api.auth` | Signs bearer tokens. If unset the API still starts but every token is invalidated on restart, and it prints a `[WARN]`. |
 | `FASTAPI_BASE_URL` | `kestrel.agent` | Where the agent's tools send HTTP requests. |
 | `ALLOWED_ORIGINS` | `kestrel.api.main` | Comma-separated CORS allow-list. |
+| `STAFF_API_KEY` | `kestrel.api.main` | The staff desk's shared key. Unset: staff endpoints answer 503. |
+| `SUPABASE_URL`, `SUPABASE_ANON_KEY` | `kestrel.api.accounts`, `tasks.ps1 web` | Google and emailed-code sign-in. |
+| `AGENT_HISTORY_KEY` | REST tier and agent service | Shared secret the agent service sends to save assistant turns (`X-Agent-Key`). |
 
 ---
 
@@ -97,6 +107,10 @@ Apply the migrations **in this order** in the Supabase SQL editor:
 | 006 | `db/migrations/006_entitlements_and_handoff.sql` | `vouchers` (final shape), `handoff_cases`, `flights.disruption_reason` (FR-04, FR-05, FR-09). |
 | 007 | `db/migrations/007_flights_rls.sql` | Row-level security on `flights`, missed in 002. |
 | 008 | `db/migrations/008_advisor_fixes.sql` | Procedure `search_path`; foreign-key indexes on `pnr_bookings`. |
+| 009 | `db/migrations/009_passenger_accounts.sql` | `passenger_accounts`: a Supabase account linked to one passenger. |
+| 010 | `db/migrations/010_chat_memory_and_frustration.sql` | `chat_messages` (conversation memory) and the `FRUSTRATION` hand-off trigger. |
+| 011 | `db/migrations/011_rebooking_same_route.sql` | Procedure: refuses a flight on another route (`DIFFERENT_ROUTE`). |
+| 012 | `db/migrations/012_cancelled_at_and_history_cap.sql` | `flights.cancelled_at` (set by a trigger) and a 100-turn cap per booking on `chat_messages`. |
 | — | `db/seeds/reset_demo_state.sql` | Repeatable reset to a known disrupted state. Not a migration; run with `make reset`. |
 
 Migration 003 corrects five defects in 001, each covered by a test in
@@ -132,25 +146,26 @@ alternative flight (`reset_demo.py --if-stale`).
 
 ---
 
-## Running
+## Running the system
 
-```bash
-make api        # uvicorn kestrel.api.main:app --reload  -> http://127.0.0.1:8000/docs
-make smoke      # verify the DB and the stored procedure end to end
-make agent      # run the agent for a disrupted passenger (needs `make api` running)
-make reset      # reset the demo data to now
+From the repo root, in PowerShell:
+
+```powershell
+.	asks.ps1 start    # REST tier on :8000 and agent service on :8001 (two windows)
+.	asks.ps1 web      # release build of the client, served on http://localhost:8080
 ```
 
-`/health` should report `status: online` and `database: connected`.
+Open http://localhost:8080. Every screen shows data from the REST tier, which
+reads Supabase; nothing is sample data except the table on Home labelled
+"Example". Sign in as a guest with a disrupted booking's reference and
+surname, or as staff with your name and `STAFF_API_KEY`.
 
-`make smoke` discovers a disrupted PNR and a viable alternative at runtime,
-calls the procedure twice to demonstrate the idempotency guard, and rolls the
-transaction back so the demonstration state is unchanged.
+Once, before the first run: add `http://localhost:8080` to `ALLOWED_ORIGINS`
+in `.env`, and `http://localhost:8080/**` to Supabase → Authentication → URL
+Configuration → Redirect URLs (for Google sign-in).
 
-`make agent` runs `scripts/agent_demo.py`, which picks a disrupted passenger
-from the database and hands the PNR and surname to the agent. The agent has no
-database access, so it cannot look one up itself. To run it for a specific
-passenger: `python -m kestrel.agent --pnr IZNXXV --last-name Cowan`.
+`.	asks.ps1 down` stops both services. `/health` on :8000 should report
+`database: connected`. Other targets: `.	asks.ps1 help`.
 
 ---
 
@@ -189,60 +204,28 @@ mistake fail the build.
 
 ```
 kestrel/
-├── src/kestrel/                  Application package (pip install -e .)
-│   ├── config.py                 Loads .env once, before anything reads it
-│   ├── agent.py                  Bounded tool-calling agent   (python -m kestrel.agent)
-│   └── api/
-│       ├── main.py               REST tier                    (uvicorn kestrel.api.main:app)
-│       └── auth.py               Session authentication and throttling
-├── db/
-│   ├── migrations/               000-003, applied in order
-│   └── seeds/reset_demo_state.sql
-├── scripts/
-│   ├── dataset_generator.py      Synthetic dataset
-│   ├── export_schema.py          Dump the live base schema as migration 000
-│   ├── smoke_test.py             Database and stored-procedure smoke test
-│   ├── reset_demo.py             Reset demo data to now (--if-stale: only when needed)
-│   ├── agent_demo.py             Run the agent for a disrupted passenger
-│   └── check_secrets.py          Credential guard used by CI and pre-commit
-├── tests/
-│   ├── unit/                     No database needed
-│   └── integration/              Need DATABASE_URL; skipped without it
-├── docs/
-│   ├── sprints/                  Dated sprint and change records
-│   └── proposals/                Proposed work awaiting approval
-├── .github/workflows/ci.yml      Secret scan, lint, tests
-├── pyproject.toml                Package metadata, ruff and pytest configuration
-├── requirements.txt              Runtime dependencies (floors)
-├── requirements-dev.txt          Test and lint dependencies
-├── Makefile / tasks.ps1          Task runner (make / PowerShell)
-└── .env.example                  Configuration template
+├── client/                       Flutter web client (see client/README.md)
+├── src/kestrel/                  Python package (pip install -e .)
+│   ├── api/                      REST tier (uvicorn kestrel.api.main:app)
+│   ├── agent.py, agent_service.py  Agent tier (uvicorn kestrel.agent_service:app)
+│   ├── entitlements.py, handoff.py, frustration.py, suggestions.py
+│   └── policy/                   Policy chunking, embeddings, retrieval
+├── db/migrations/                000-012, applied in order
+├── db/seeds/reset_demo_state.sql
+├── deploy/                       Dockerfile, Cloud Run and Fly.io configuration
+├── scripts/                      Dataset, reset, ingestion, evaluation, smoke and latency scripts
+├── tests/unit/, tests/integration/
+├── docs/                         Sprint records, test log, performance measurements
+├── .github/workflows/ci.yml      Secret scan, lint, tests, Flutter analyze and test
+└── Makefile / tasks.ps1          Task runner (make / PowerShell)
 ```
 
 The project report (`.docx` / `.pdf`) is not kept in this repository; it lives
 in `OneDrive/Documents/Project Kestrel/report/`.
 
----
+### Known limits
 
-## Status
-
-| Component | State |
-|---|---|
-| REST tier with session authentication | Implemented |
-| Bounded agent tier | Implemented |
-| Corrected stored procedure (migration 003) | Implemented and tested |
-| Synthetic dataset generator | Implemented |
-| Development environment, CI, test suite | Sprint 1 |
-| Policy retrieval (pgvector RAG, FR-02) | Sprint 2 |
-| Deterministic entitlement rules (FR-04) | Sprint 2 |
-| Hand-off case queue | Sprint 2 |
-| Flutter client | Sprint 3 |
-
-### Known open items
-
-- Cabin class is not enforced during seat assignment, so a disrupted economy
-  passenger can be given a business seat. Fix 5, scheduled for Sprint 2.
 - Login throttling is per-process and in-memory; it will not hold across
-  multiple workers.
-- `db/migrations/000_base_schema.sql` must be generated and committed before the
-  repository can rebuild the database from nothing.
+  multiple workers or replicas.
+- `/api/trip` runs four queries at once on four of the ten pooled
+  connections (see `docs/connection-pool.md`).

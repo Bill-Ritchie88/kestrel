@@ -27,7 +27,8 @@ where = ["src"]
 line-length = 100
 target-version = "py313"
 src = ["src", "tests", "scripts"]
-exclude = ["__pycache__", ".venv", "venv"]
+# .claude holds third-party agent skills (e.g. ui-ux-pro-max), not Kestrel code.
+exclude = ["__pycache__", ".venv", "venv", ".claude"]
 
 [tool.ruff.lint]
 # E/F  pyflakes + pycodestyle errors

@@ -3,6 +3,9 @@
 
 -r requirements.txt
 
+# Test data generation (scripts/dataset_generator.py)
+faker>=30.0
+
 pytest>=8.3
 pytest-asyncio>=0.24
 ruff>=0.7

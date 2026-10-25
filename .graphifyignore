@@ -1,0 +1,5 @@
+# Graphify: leave out bundled skills, the archived showcase site and the
+# Flutter web shell, which skewed the map (T3).
+.claude/
+site/
+client/web/
