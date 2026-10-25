@@ -25,4 +25,17 @@ class AppConfig {
 
   /// Matches TOKEN_TTL_SECONDS in src/kestrel/api/auth.py (FR-01).
   static const sessionMinutes = 15;
+
+  /// Supabase Auth, for Google and emailed-code sign-in:
+  ///   `--dart-define=SUPABASE_URL=https://<ref>.supabase.co`
+  ///   `--dart-define=SUPABASE_ANON_KEY=<anon key>`
+  /// Without both, the sign-in page offers only the booking reference and
+  /// the staff key.
+  static const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
+  static const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+  static bool get accountSignIn => supabaseUrl.isNotEmpty && supabaseAnonKey.isNotEmpty;
+
+  /// Where Google sends the Android app back to (a deep link; see
+  /// client/README.md). In a browser it is the page's own address.
+  static const appAuthRedirect = 'io.kestrel.app://login-callback';
 }

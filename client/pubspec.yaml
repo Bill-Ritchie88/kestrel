@@ -7,14 +7,15 @@ environment:
   sdk: ">=3.5.0 <4.0.0"
 
 dependencies:
+  fetch_client: ^1.2.1
   flutter:
     sdk: flutter
   # REST tier (:8000) and agent service (:8001) over HTTP.
   http: ">=1.2.0 <3.0.0"
-  # Inter, the design system's typeface (kestrel-ui-design-system.md).
-  google_fonts: ">=6.2.0 <9.0.0"
   # Voice dictation through the device's own recogniser (FR-08, IR-07).
   speech_to_text: ">=7.0.0 <9.0.0"
+  supabase_flutter: ^2.18.3
+  web: ^1.1.1
 
 dev_dependencies:
   flutter_test:
@@ -23,3 +24,21 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # The design system's typefaces (kestrel-ui-design-system.md), bundled so
+  # the first screen never waits on fonts.gstatic.com. SIL Open Font
+  # Licence: assets/fonts/OFL-*.txt.
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+        - asset: assets/fonts/Inter-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Inter-Bold.ttf
+          weight: 700
+    - family: JetBrains Mono
+      fonts:
+        - asset: assets/fonts/JetBrainsMono-Regular.ttf
+        - asset: assets/fonts/JetBrainsMono-SemiBold.ttf
+          weight: 600

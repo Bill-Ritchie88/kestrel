@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 /// Design tokens from the Figma file "Project Kestrel - UI", page
 /// 01 · Design System (kestrel-ui-design-system.md).
@@ -11,9 +10,11 @@ import 'package:google_fonts/google_fonts.dart';
 ///   crimson/glow #FF2E55 (5.4:1); crimson/500 stays a fill, where white text
 ///   on it reaches 5.1:1.
 class K {
-  /// Inter is fetched by google_fonts at run time. Widget tests have no
-  /// network, so they switch this off and fall back to the platform font.
-  static bool useGoogleFonts = true;
+  /// Inter and JetBrains Mono are bundled with the app (assets/fonts,
+  /// declared in pubspec.yaml), so the first screen never waits on a font
+  /// download from Google. Widget tests draw them with the test font.
+  static const fontFamily = 'Inter';
+  static const monoFamily = 'JetBrains Mono';
 
   static TextStyle inter({
     double? fontSize,
@@ -23,7 +24,8 @@ class K {
     Color? color,
     List<FontFeature>? fontFeatures,
   }) {
-    final style = TextStyle(
+    return TextStyle(
+      fontFamily: fontFamily,
       fontSize: fontSize,
       height: height,
       fontWeight: fontWeight,
@@ -31,7 +33,27 @@ class K {
       color: color,
       fontFeatures: fontFeatures,
     );
-    return useGoogleFonts ? GoogleFonts.inter(textStyle: style) : style;
+  }
+
+  /// Monospace for codes, kickers and data labels (booking references,
+  /// "01 — HOW IT WORKS", clause chips), as in the approved mockups.
+  static TextStyle mono({
+    double? fontSize,
+    double? height,
+    FontWeight? fontWeight,
+    double? letterSpacing,
+    Color? color,
+  }) {
+    return TextStyle(
+      fontFamily: monoFamily,
+      fontFamilyFallback: const ['monospace'],
+      fontSize: fontSize,
+      height: height,
+      fontWeight: fontWeight,
+      letterSpacing: letterSpacing,
+      color: color,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
   }
 
   // Surfaces
@@ -57,9 +79,17 @@ class K {
   static const amber = Color(0xFFE2A33C);
   static const sky = Color(0xFFDCE3EF);
 
+  /// Tints behind crimson text and icons (glow on these stays above 4.5:1).
+  static const crimsonSoft = Color(0x24D81B3C);
+  static const tealSoft = Color(0x1F23C79A);
+  static const amberSoft = Color(0x1FE2A33C);
+
   /// 4/8 spacing rhythm.
   static const s1 = 4.0, s2 = 8.0, s3 = 12.0, s4 = 16.0, s5 = 24.0, s6 = 32.0;
   static const radius = 16.0;
+
+  /// Cards, tickets and panels in the dashboard layout.
+  static const radiusLg = 22.0;
 
   /// Minimum touch target (48 dp, Android; >= 44 pt iOS).
   static const touch = 48.0;
@@ -97,10 +127,8 @@ class K {
 }
 
 ThemeData kestrelTheme() {
-  final base = ThemeData(brightness: Brightness.dark, useMaterial3: true);
-  final textBase =
-      K.useGoogleFonts ? GoogleFonts.interTextTheme(base.textTheme) : base.textTheme;
-  final text = textBase.copyWith(
+  final base = ThemeData(brightness: Brightness.dark, useMaterial3: true, fontFamily: K.fontFamily);
+  final text = base.textTheme.copyWith(
     displaySmall: K.inter(
         fontSize: 34, height: 40 / 34, fontWeight: FontWeight.w700, letterSpacing: -0.5),
     headlineSmall: K.inter(
@@ -169,6 +197,27 @@ ThemeData kestrelTheme() {
       backgroundColor: K.elevated,
       contentTextStyle: text.bodyMedium,
       behavior: SnackBarBehavior.floating,
+    ),
+    // Phone tab bar (Trip, Assistant, Flights, Vouchers, Help).
+    navigationBarTheme: NavigationBarThemeData(
+      backgroundColor: K.void_,
+      indicatorColor: K.crimsonSoft,
+      surfaceTintColor: Colors.transparent,
+      height: 68,
+      iconTheme: WidgetStateProperty.resolveWith((s) => IconThemeData(
+            color: s.contains(WidgetState.selected) ? K.glow : K.textSecondary,
+          )),
+      labelTextStyle: WidgetStateProperty.resolveWith((s) => K.inter(
+            fontSize: 12,
+            fontWeight: s.contains(WidgetState.selected) ? FontWeight.w600 : FontWeight.w500,
+            color: s.contains(WidgetState.selected) ? K.textPrimary : K.textSecondary,
+          )),
+    ),
+    dividerTheme: const DividerThemeData(color: K.hairline, space: 1, thickness: 1),
+    popupMenuTheme: PopupMenuThemeData(
+      color: K.elevated,
+      textStyle: text.bodyMedium,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(K.radius)),
     ),
     progressIndicatorTheme: const ProgressIndicatorThemeData(color: K.glow),
     focusColor: K.glow.withAlpha(60),

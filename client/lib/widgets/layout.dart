@@ -9,8 +9,15 @@ import '../theme.dart';
 class Breakpoints {
   Breakpoints._();
 
-  /// From here the chat gets a side panel with the booking and actions.
+  /// From here the app has a sidebar instead of the phone tab bar.
   static const wide = 1080.0;
+
+  /// Content width (beside the sidebar) from which a page gets a second
+  /// column: the dashboard's progress panel, the chat's trip panel.
+  static const twoPane = 980.0;
+
+  /// The dashboard's widest content.
+  static const dashboard = 1180.0;
 
   /// From here lists of flights show two cards per row.
   static const twoColumn = 900.0;
@@ -21,8 +28,6 @@ class Breakpoints {
   static const chat = 760.0;
   static const grid = 1100.0;
 }
-
-bool isWide(BuildContext context) => MediaQuery.sizeOf(context).width >= Breakpoints.wide;
 
 /// Padding that centres content of at most [maxWidth] inside a full-width
 /// scroll view. Using padding rather than a narrower box keeps the scrollbar

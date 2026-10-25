@@ -4,12 +4,15 @@ import '../api/kestrel_api.dart';
 import '../api/models.dart';
 import '../format.dart';
 import '../state/session.dart';
+import '../state/shell.dart';
+import '../state/trip.dart';
 import '../theme.dart';
 import '../widgets/api_error.dart';
 import '../widgets/cards.dart';
 import '../widgets/common.dart';
 import '../widgets/layout.dart';
-import 'vouchers_screen.dart';
+import '../widgets/shell.dart';
+import '../widgets/system_state.dart';
 
 /// M11 · Confirm rebooking (UC4, FR-03). The seat is claimed by the atomic
 /// stored procedure (row lock, SKIP LOCKED); if the last seat goes to someone
@@ -31,13 +34,16 @@ class _ConfirmScreenState extends State<ConfirmScreen> {
 
   Future<void> _confirm() async {
     final session = SessionScope.read(context);
+    final trip = TripScope.maybeRead(context);
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
       final result = await session.api.rebook(widget.flight.id);
-      await session.refresh();
+      // The confirmation shows the booking the rebooking returned; the trip
+      // everywhere else catches up behind it.
+      trip?.refreshQuietly();
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => ConfirmedScreen(result: result)),
@@ -67,6 +73,9 @@ class _ConfirmScreenState extends State<ConfirmScreen> {
       appBar: AppBar(title: const Text('Confirm your new flight')),
       body: PageList(
         children: [
+          Text('Check the details, then confirm. There is no charge for this change.',
+              style: t.bodyMedium?.copyWith(color: K.textSecondary)),
+          const SizedBox(height: K.s5),
           if (booking != null) ...[
             const SectionLabel('Cancelled'),
             const SizedBox(height: K.s2),
@@ -76,17 +85,21 @@ class _ConfirmScreenState extends State<ConfirmScreen> {
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text('${booking.original.number} · ${dayLabel(booking.original.departureLocal)}',
                       style: t.titleMedium?.copyWith(decoration: TextDecoration.lineThrough)),
-                  const SizedBox(height: K.s3),
-                  FlightLeg(
+                  const SizedBox(height: K.s4),
+                  RouteLine(
                     origin: booking.original.origin,
                     destination: booking.original.destination,
                     departureLocal: booking.original.departureLocal,
                     arrivalLocal: booking.original.arrivalLocal,
+                    cancelled: true,
                   ),
                 ]),
               ),
             ),
-            const SizedBox(height: K.s4),
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: K.s3),
+              child: Center(child: IconChip(Icons.arrow_downward, size: 40)),
+            ),
           ],
           const SectionLabel('Your new flight'),
           const SizedBox(height: K.s2),
@@ -97,36 +110,34 @@ class _ConfirmScreenState extends State<ConfirmScreen> {
             const SizedBox(width: K.s2),
             Expanded(
               child: Text(
-                'We\'ll hold a ${titleCase(f.cabin ?? booking?.cabin ?? 'economy')} seat for you '
-                'and issue any vouchers you\'re entitled to straight away. '
-                'There is no charge for this change.',
+                'We\'ll hold ${_withArticle(titleCase(f.cabin ?? booking?.cabin ?? 'economy'))} seat for you '
+                'and issue any vouchers you\'re entitled to straight away.',
                 style: t.bodySmall?.copyWith(color: K.textSecondary),
               ),
             ),
           ]),
-          if (_error != null) ...[
-            const SizedBox(height: K.s4),
-            ErrorNotice(
-              message: _soldOut
-                  ? 'That flight has just filled up in your cabin. Please choose another one. '
-                      '($_error)'
-                  : _error!,
-              onRetry: _soldOut ? null : _confirm,
+          // 409: the last seat went to someone else first. Nothing changed on
+          // the booking; the way forward is another flight.
+          if (_soldOut) ...[
+            const SizedBox(height: K.s5),
+            SystemStateCard.seatTaken(
+              onChooseAnother: () => Navigator.of(context).pop(true),
+              onPerson: () => askForPerson(context,
+                  summary: 'Rebooking refused: the last seat on ${f.number} went to another passenger first.'),
+            ),
+          ] else ...[
+            if (_error != null) ...[
+              const SizedBox(height: K.s4),
+              ErrorNotice(message: _error!, onRetry: _confirm),
+            ],
+            const SizedBox(height: K.s5),
+            PrimaryButton(label: 'Confirm rebooking', busy: _busy, onPressed: _confirm),
+            const SizedBox(height: K.s3),
+            SecondaryButton(
+              label: 'Back',
+              onPressed: _busy ? null : () => Navigator.of(context).pop(false),
             ),
           ],
-          const SizedBox(height: K.s5),
-          if (_soldOut)
-            PrimaryButton(
-              label: 'Choose another flight',
-              onPressed: () => Navigator.of(context).pop(true),
-            )
-          else
-            PrimaryButton(label: 'Confirm rebooking', busy: _busy, onPressed: _confirm),
-          const SizedBox(height: K.s3),
-          SecondaryButton(
-            label: 'Back',
-            onPressed: _busy ? null : () => Navigator.of(context).pop(false),
-          ),
         ],
       ),
     );
@@ -138,6 +149,11 @@ class ConfirmedScreen extends StatelessWidget {
   const ConfirmedScreen({super.key, required this.result});
   final Map<String, dynamic> result;
 
+  void _goTo(BuildContext context, Section s) {
+    ShellScope.read(context).go(s);
+    Navigator.of(context).popUntil((r) => r.isFirst);
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
@@ -148,14 +164,32 @@ class ConfirmedScreen extends StatelessWidget {
         .where((v) => v.isLive)
         .toList();
     return Scaffold(
-      appBar: AppBar(automaticallyImplyLeading: false, title: const Text('Rebooked')),
+      // "Done" stays in reach however many vouchers were issued below.
+      appBar: AppBar(
+        automaticallyImplyLeading: false,
+        title: const Text('Rebooked'),
+        actions: [
+          TextButton(
+            onPressed: () => _goTo(context, Section.trip),
+            style: TextButton.styleFrom(
+                foregroundColor: K.glow, minimumSize: const Size(K.touch, K.touch)),
+            child: const Text('Done'),
+          ),
+          const SizedBox(width: K.s2),
+        ],
+      ),
       body: PageList(
         children: [
           Semantics(
             liveRegion: true,
             child: Column(children: [
-              const Icon(Icons.check_circle, color: K.teal, size: 64),
-              const SizedBox(height: K.s3),
+              Container(
+                width: 88,
+                height: 88,
+                decoration: const BoxDecoration(color: K.tealSoft, shape: BoxShape.circle),
+                child: const Icon(Icons.check_circle, color: K.teal, size: 56),
+              ),
+              const SizedBox(height: K.s4),
               Text('You\'re rebooked', style: t.headlineSmall, textAlign: TextAlign.center),
               const SizedBox(height: K.s1),
               Text(
@@ -167,10 +201,10 @@ class ConfirmedScreen extends StatelessWidget {
             ]),
           ),
           const SizedBox(height: K.s5),
-          if (booking != null) BookingCard(booking: booking),
+          if (booking != null) TripTicket(booking: booking),
           if (vouchers.isNotEmpty) ...[
             const SizedBox(height: K.s5),
-            const SectionLabel('Issued to you'),
+            const SectionHeader('Issued to you'),
             const SizedBox(height: K.s2),
             for (final v in vouchers)
               Padding(
@@ -179,19 +213,18 @@ class ConfirmedScreen extends StatelessWidget {
               ),
           ],
           const SizedBox(height: K.s4),
-          PrimaryButton(
-            label: 'Back to chat',
-            onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
-          ),
+          PrimaryButton(label: 'Back to my trip', onPressed: () => _goTo(context, Section.trip)),
           const SizedBox(height: K.s3),
           SecondaryButton(
-            label: 'All entitlements',
-            icon: Icons.card_giftcard,
-            onPressed: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const VouchersScreen())),
+            label: 'All vouchers & entitlements',
+            icon: Icons.confirmation_number_outlined,
+            onPressed: () => _goTo(context, Section.vouchers),
           ),
         ],
       ),
     );
   }
 }
+
+/// "an Economy", "a Business".
+String _withArticle(String word) => '${word.startsWith(RegExp('[AEIOU]')) ? 'an' : 'a'} $word';
