@@ -224,3 +224,31 @@ def test_local_time_uses_the_airports_zone():
     assert local_iso(utc, "NBO") == "2026-10-11T16:21+03:00"
     assert local_iso(utc, "AMS") == "2026-10-11T15:21+02:00"  # CEST
     assert local_iso(None, "NBO") is None
+
+
+def test_the_answer_does_not_change_with_the_day_you_ask():
+    """Issue #13: with the cancellation time stored (flights.cancelled_at,
+    migration 012), the notice rule no longer reads "now"."""
+    from kestrel.api.booking import context_from_booking
+    from tests.unit.test_endpoints import booking_row
+
+    row = booking_row(cancelled_at=None)
+    row["cancelled_at"] = row["original_departure"] - timedelta(days=20)
+    asked_early = evaluate(context_from_booking(row, now=row["original_departure"] - timedelta(days=15)))
+    asked_late = evaluate(context_from_booking(row, now=row["original_departure"] - timedelta(hours=1)))
+    def cash(d):
+        return ("CASH_COMPENSATION" in {e.entitlement_type for e in d.entitlements},
+                [n for n in d.notes if "compensation" in n.lower()])
+
+    assert cash(asked_early) == cash(asked_late)
+    assert cash(asked_late)[0] is False
+    # Without the stored time the late answer would have differed (the old bug).
+    row["cancelled_at"] = None
+    old = evaluate(context_from_booking(row, now=row["original_departure"] - timedelta(hours=1)))
+    assert "CASH_COMPENSATION" in {e.entitlement_type for e in old.entitlements}
+
+
+def test_the_booking_query_reads_cancelled_at():
+    from kestrel.api.booking import SQL_LOAD_BOOKING
+
+    assert "o.cancelled_at" in SQL_LOAD_BOOKING
