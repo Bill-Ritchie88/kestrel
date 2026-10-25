@@ -14,7 +14,16 @@ from __future__ import annotations
 import json
 
 TRIGGERS = frozenset(
-    {"LOW_SIMILARITY", "NO_ALTERNATIVES", "STEP_LIMIT", "REBOOKING_FAILED", "PASSENGER_REQUEST"}
+    {
+        "LOW_SIMILARITY",
+        "NO_ALTERNATIVES",
+        "STEP_LIMIT",
+        "REBOOKING_FAILED",
+        "PASSENGER_REQUEST",
+        # The passenger repeated a question or showed clear frustration, and the
+        # agent service handed over early (migration 010; kestrel.frustration).
+        "FRUSTRATION",
+    }
 )
 # Triggers a passenger session may raise directly. LOW_SIMILARITY is only ever
 # raised by the REST tier itself, from a real retrieval result.
@@ -65,7 +74,7 @@ SQL_LIST_FOR_PNR = f"""
 SQL_LIST_BY_STATUS = f"""
     SELECT {_COLUMNS} FROM handoff_cases
     WHERE ($1::text IS NULL OR status = $1)
-    ORDER BY created_at ASC
+    ORDER BY created_at DESC
     LIMIT $2;
 """  # noqa: S608
 
@@ -75,6 +84,10 @@ SQL_RESOLVE = f"""
     WHERE case_id = $1 AND status = 'OPEN'
     RETURNING {_COLUMNS};
 """  # noqa: S608
+
+# Taken first in open_case's transaction: two requests at once for the same
+# booking queue here, so the second finds the first one's case (issue #20).
+SQL_LOCK_BOOKING = "SELECT 1 FROM pnr_bookings WHERE pnr_code = $1 FOR UPDATE;"
 
 SQL_AUDIT = """
     INSERT INTO audit_logs (pnr_code, actor, action, details)
@@ -119,6 +132,7 @@ async def open_case(
         raise ValueError(f"Unknown hand-off trigger: {trigger}")
     scores_json = json.dumps(similarity_scores) if similarity_scores is not None else None
     async with conn.transaction():
+        await conn.execute(SQL_LOCK_BOOKING, pnr_code)
         existing = await conn.fetchrow(SQL_FIND_OPEN, pnr_code, trigger)
         if existing is not None:
             row = await conn.fetchrow(

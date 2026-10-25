@@ -74,6 +74,10 @@ class RestTier:
             return httpx.Response(200, json=self.alternatives)
         if path == "/api/reaccommodate":
             fid = json.loads(request.content)["target_flight_id"]
+            if fid == "other-route-id":
+                return httpx.Response(409, headers={"X-Refusal-Reason": "DIFFERENT_ROUTE"}, json={
+                    "detail": "Target flight flies NBO to LHR; this booking can only move to "
+                    "another NBO to MBA flight."})
             if fid != "real-flight-id":
                 return httpx.Response(409, json={"detail": "Target flight does not exist."})
             return httpx.Response(200, json={
@@ -243,3 +247,37 @@ def test_turn_timing_is_recorded(rest):
     assert len(t["tool_ms"]) == 1
     assert t["total_ms"] >= 0
     assert result.to_dict()["timing"] == t
+
+
+def test_a_flight_on_another_route_is_refused_and_the_model_is_told_why(rest):
+    """Issue #2: the tool result names DIFFERENT_ROUTE, so the model offers
+    same-route flights instead of claiming a rebooking."""
+    out = json.loads(agent.reaccommodate_passenger_tool.invoke({"target_flight_id": "other-route-id"}))
+    assert out["status"] == "DIFFERENT_ROUTE"
+    assert "NBO to LHR" in out["detail"] and "Nothing was changed" in out["detail"]
+
+
+def test_tool_results_are_never_printed(rest, capsys):
+    """Issue #11: tool results hold voucher codes and the passenger's words."""
+    llm = ScriptedLLM([
+        AIMessage(content="", tool_calls=[_call("reaccommodate_passenger_tool",
+                                                {"target_flight_id": "real-flight-id"})]),
+        AIMessage(content="Done."),
+    ])  # fmt: skip
+    agent.run_agent("Book KQ116 please", llm=llm)
+    out = capsys.readouterr().out
+    assert "KQ-MV-0001-AB" not in out and "TOOL RESULT" not in out and "real-flight-id" not in out
+
+
+def test_only_whole_rights_words_start_a_speculative_search():
+    """Issue #21: "cancel" and "delay" are in nearly every message, and
+    "right"/"care" matched inside "alright" and "careful"."""
+    for text in ("My flight was cancelled", "alright, thanks", "be careful", "Why the delay?"):
+        assert not agent.looks_like_rights_question(text), text
+    for text in ("Can I get a refund?", "What are my rights?", "Do I get a hotel", "EU261 compensation"):
+        assert agent.looks_like_rights_question(text), text
+
+
+def test_a_slow_rebooking_is_not_cut_off_at_ten_seconds():
+    """Issue #37."""
+    assert agent.http_client.timeout.read >= 30

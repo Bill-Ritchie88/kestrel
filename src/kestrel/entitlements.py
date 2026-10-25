@@ -214,6 +214,16 @@ def _local(dt: datetime, airport: str) -> datetime:
     return dt.astimezone(ZoneInfo(AIRPORTS.get(airport, (0, 0, "UTC", ""))[2]))
 
 
+def when_text(local: str | None) -> str:
+    """'2026-10-18T16:26+03:00' -> 'Sun 18 Oct at 16:26' (the one copy:
+    quick replies and the reasons under each flight)."""
+    try:
+        t = datetime.fromisoformat(local)
+    except (TypeError, ValueError):
+        return "an unknown time"
+    return f"{t:%a} {t.day} {t:%b} at {t:%H:%M}"
+
+
 def local_iso(dt: datetime | None, airport: str) -> str | None:
     """ISO time in the airport's own time zone, offset included.
 
