@@ -1,6 +1,6 @@
 # Kestrel latency - Phase 2 (warm pool, no reset round trip, /api/trip, gzip)
 
-Measured 2026-10-18 14:15 E. Africa Standard Time with `scripts/measure_latency.py` on Windows 11, Python 3.13.14.
+Measured 2026-10-18 14:15 E. Africa Standard Time with `scripts/evaluation/measure_latency.py` on Windows 11, Python 3.13.14.
 REST tier http://127.0.0.1:8000, agent service http://127.0.0.1:8001; booking A27Z99 (DISRUPTED). REST calls x10, assistant questions x0 (15 s apart, for the model's per-minute quota), one after another over one keep-alive connection.
 
 All times in milliseconds. *wall*: what the client waited. *app*: the REST tier's own time (Server-Timing). *first*: the first run, which pays any cold start. *first words*: when the reply text started (agent `first_token_ms`).

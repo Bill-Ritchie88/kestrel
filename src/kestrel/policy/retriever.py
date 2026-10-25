@@ -7,7 +7,7 @@ question is out of scope: the agent must not answer it from its own
 knowledge, and the REST tier opens a hand-off case instead.
 
 tau starts at 0.75 (Section 4.2.1) and is calibrated by
-scripts/evaluate_retrieval.py, which picks the value maximising F0.5 on the
+scripts/evaluation/evaluate_retrieval.py, which picks the value maximising F0.5 on the
 labelled question set. Set POLICY_TAU in .env to the calibrated value.
 """
 

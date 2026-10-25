@@ -54,7 +54,7 @@ async def disrupted(conn):
     if booking is None:
         pytest.skip(
             "No disrupted passenger with an alternative flight; the demo data is "
-            "stale. Run: python scripts/reset_demo.py"
+            "stale. Run: python scripts/data/reset_demo.py"
         )
     target = booking["target"]
 

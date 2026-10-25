@@ -215,7 +215,7 @@ laptop the WebAssembly build showed its first screen in 0.85 s on a first
 visit and 0.29 s on a repeat visit (JavaScript: 1.65 s and 0.59 s).
 
 It then serves `client/build/web` on **http://localhost:8080** with
-`scripts/serve_web.py` (Python standard library only): gzip for
+`scripts/dev/serve_web.py` (Python standard library only): gzip for
 js/wasm/json/css/html, `no-cache` + ETag revalidation for `index.html` and
 for Flutter's own files (their names carry no content hash, so a repeat
 visit gets `304 Not Modified` instead of a download), a year's

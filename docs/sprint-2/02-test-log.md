@@ -93,7 +93,7 @@ all live; results checked afterwards in the database. 9 Oct 2026, ~01:00.
 
 ## 7. Performance (PF)
 
-Measured with `scripts/measure_latency.py` (report: `docs/sprint-2/performance/0-baseline.md`)
+Measured with `scripts/evaluation/measure_latency.py` (report: `docs/sprint-2/performance/0-baseline.md`)
 on the workstation over a phone hotspot, REST tier and agent service local, Supabase in
 eu-central-1 (Frankfurt). Booking A27Z99 (Edwards, DISRUPTED). REST calls x10 and assistant
 questions x3 (15 s apart), times in ms as p50 / p90. The REST tier's own Server-Timing is
@@ -111,7 +111,7 @@ it on round trips to the database.
 | PF-07 | Baseline assistant "Can I get a refund instead?" | Recorded | Not measured: all three runs **429 RESOURCE_EXHAUSTED** (free tier `generate_content_free_tier_requests`, limit 20, `gemini-3.6-flash`: exactly 20 model calls had succeeded today, so this is the daily quota). The first, unpaced attempt (13:05) also hit the per-minute limit after 6 calls; its one completed refund turn took 11,407 ms | The script now spaces questions 15 s apart (`--chat-pause`) for the per-minute limit. Live assistant measurements in later phases are kept few, and compared within one run on the same model |
 
 Start-up of the website (Phase 1). Release build served by `.\tasks.ps1 web`
-(`scripts/serve_web.py`). "First screen" is `window.kestrelFirstFrameMs`, recorded by
+(`scripts/dev/serve_web.py`). "First screen" is `window.kestrelFirstFrameMs`, recorded by
 `web/index.html` on Flutter's `flutter-first-frame` event. Measured in **headless Chrome 155**
 (puppeteer-core driving the installed Chrome, 1280 x 576): first visits in a fresh profile
 (x3), repeat visits by reloading (x7). The interactive Chrome window first used for this was
@@ -129,7 +129,7 @@ those readings are discarded. No start-up measurement was taken before Phase 1.
 | PF-12 | `flutter build web --wasm` and every screen in Chrome | Builds; every screen works | Builds. Screen tour of the WebAssembly build (headless): Home, Help, sign-in, guest sign-in, My trip, Flights, Confirm, Vouchers, Help, Assistant, sign-out, staff desk with its cases (a test staff key given to a local API instance; the real key was not used) - **no page errors, no external requests**. With COOP/COEP (second render thread) no faster: first visit median 1,032 ms, repeat 285 ms | Pass: `--wasm` kept in `tasks.ps1 web`, without COOP/COEP |
 | PF-13 | Staff desk loaded only when staff sign in (deferred library) | Not downloaded by passengers | JavaScript build: passenger session (sign-in, all five sections) never requested `main.dart.js_1.part.js`; staff sign-in submitted: requested once, 15 KB. WebAssembly build: dart2wasm keeps the deferred library inside `main.dart.wasm` | Pass for the JavaScript build; not split in the WebAssembly build (which still starts faster) |
 
-Instant screens (Phase 2). REST times by `scripts/measure_latency.py --chat-runs 0` (report:
+Instant screens (Phase 2). REST times by `scripts/evaluation/measure_latency.py --chat-runs 0` (report:
 `docs/sprint-2/performance/2-warm-pool-trip-endpoint-gzip.md`), x10, p50 / p90 in ms; section switches in headless
 Chrome as above (click to the frame that shows the section).
 
@@ -141,7 +141,7 @@ Chrome as above (click to the frame that shows the section).
 | PF-17 | Section switch (My trip, Assistant, Flights, Vouchers, Help), 15 switches x 2 runs | < 300 ms, no request | Median **117-127 ms**, max 159-165 ms; **0** API requests | Pass |
 | PF-18 | Guest sign-in to My trip with data (headless) | Recorded | 661 ms (sign-in 430 ms, then `/api/trip` 399 ms; the layout and skeletons show after the first) | Recorded |
 
-Faster, smarter assistant (Phase 3). `scripts/measure_latency.py` with `--stream-runs`,
+Faster, smarter assistant (Phase 3). `scripts/evaluation/measure_latency.py` with `--stream-runs`,
 `--quick-runs` (reports `docs/sprint-2/performance/3a-streaming-and-quick-replies.md`, `3b-model-client-reuse-parallel-entitlements.md`). The
 baseline model `gemini-3.6-flash` had used its free daily quota (PF-07); `gemini-3.5-flash` is
 served from the same quota, so these runs used **`gemini-3.8-flash`** (also free tier, 20 a
@@ -212,6 +212,6 @@ Supabase, rolled back).
 - Retrieval evaluation and tau calibration on the labelled question set.
 - Flutter client acceptance runs.
 - PF-05/06/07, PF-21/22 like-for-like on `gemini-3.6-flash` once its daily quota allows
-  (`scripts/measure_latency.py --stream-runs 3 --quick-runs 10`).
+  (`scripts/evaluation/measure_latency.py --stream-runs 3 --quick-runs 10`).
 - `docker build -f deploy/Dockerfile .` on a machine with Docker (not installed on the
   workstation); then the Frankfurt deployment (`deploy/README.md`).

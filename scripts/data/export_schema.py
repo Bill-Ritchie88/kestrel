@@ -11,8 +11,8 @@ This reads the live catalogue and writes the DDL, so migration 0 is generated
 from the real schema rather than transcribed by hand from the ERD, which is
 how the ERD and the deployment drifted apart in the first place.
 
-    python scripts/export_schema.py
-    python scripts/export_schema.py --out db/migrations/000_base_schema.sql
+    python scripts/data/export_schema.py
+    python scripts/data/export_schema.py --out db/migrations/000_base_schema.sql
 
 Requires DATABASE_URL. Writes a file; changes nothing in the database.
 """
@@ -27,7 +27,7 @@ from pathlib import Path
 import asyncpg
 from dotenv import load_dotenv
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(dotenv_path=PROJECT_ROOT / ".env")
 
 TABLES = ["passengers", "flights", "seats", "pnr_bookings", "vouchers", "audit_logs"]
@@ -79,7 +79,7 @@ async def build(conn) -> str:
         "-- Project Kestrel - migration 000 (BASE SCHEMA)",
         "--",
         "-- Generated from the deployed Supabase database by",
-        "-- scripts/export_schema.py. Do not hand-edit: regenerate instead, so",
+        "-- scripts/data/export_schema.py. Do not hand-edit: regenerate instead, so",
         "-- this file cannot drift from the database the way the ERD did.",
         "--",
         f"-- Generated: {datetime.now(UTC):%Y-%m-%d %H:%M} UTC",

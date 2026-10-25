@@ -6,7 +6,7 @@ containing a live Supabase password reached the remote twice because the
 .gitignore was saved as UTF-16 and Git could not read it. Both conditions are
 checked here, so the same mistake cannot pass CI a third time.
 
-    python scripts/check_secrets.py
+    python scripts/ci/check_secrets.py
 
 Exit code 0 clean, 1 if anything is found.
 """
@@ -17,7 +17,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Resolved to an absolute path so the scan cannot be hijacked by a "git"
 # earlier on PATH (ruff S607).

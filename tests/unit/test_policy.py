@@ -219,7 +219,7 @@ def test_evaluation_reference_matching_respects_article_numbers():
     import importlib.util
     from pathlib import Path
 
-    path = Path(__file__).resolve().parents[2] / "scripts" / "evaluate_retrieval.py"
+    path = Path(__file__).resolve().parents[2] / "scripts" / "evaluation" / "evaluate_retrieval.py"
     spec = importlib.util.spec_from_file_location("evaluate_retrieval", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

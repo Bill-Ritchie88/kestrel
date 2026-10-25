@@ -30,17 +30,17 @@ test:  ## Unit tests only (no database needed)
 	pytest -v tests/unit
 
 test-all:  ## Unit + integration tests (needs DATABASE_URL; resets stale demo data)
-	$(PY) scripts/reset_demo.py --if-stale
+	$(PY) scripts/data/reset_demo.py --if-stale
 	pytest -v
 
 smoke:  ## Verify the DB connection and the stored procedure end to end
-	$(PY) scripts/smoke_test.py
+	$(PY) scripts/evaluation/smoke_test.py
 
 data:  ## Regenerate the synthetic dataset (7 days, seeded)
-	$(PY) scripts/dataset_generator.py --truncate --days 7 --seed 42
+	$(PY) scripts/data/generate_dataset.py --truncate --days 7 --seed 42
 
 reset:  ## Reset the demo data: schedule re-anchored to now, disruption recreated
-	$(PY) scripts/reset_demo.py
+	$(PY) scripts/data/reset_demo.py
 
 api:  ## Run the REST tier with reload
 	uvicorn kestrel.api.main:app --reload
@@ -49,16 +49,16 @@ agent-api:  ## Run the agent service (chat endpoint for the Flutter client) on :
 	uvicorn kestrel.agent_service:app --port 8001 --reload
 
 ingest:  ## Chunk, embed and load the policy corpus (data/policy/sources)
-	$(PY) scripts/ingest_policies.py
+	$(PY) scripts/data/ingest_policies.py
 
 evaluate:  ## Retrieval evaluation and tau calibration (data/eval/policy_questions.csv)
-	$(PY) scripts/evaluate_retrieval.py
+	$(PY) scripts/evaluation/evaluate_retrieval.py
 
 loadtest:  ## Concurrent rebooking test, rolled back (NFR-01, NFR-02)
-	$(PY) scripts/load_test.py --passengers 12
+	$(PY) scripts/evaluation/load_test.py --passengers 12
 
 agent:  ## Run the agent for a disrupted passenger (needs `make api` running)
-	$(PY) scripts/agent_demo.py
+	$(PY) scripts/dev/agent_demo.py
 
 hooks:  ## Install the pre-commit hooks
 	pre-commit install

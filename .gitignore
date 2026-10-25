@@ -3,7 +3,7 @@
 # This file MUST stay UTF-8 with LF endings. A .gitignore saved as UTF-16 (the
 # default when PowerShell's > redirection writes it on Windows) is unreadable
 # to Git, which silently ignores nothing at all. That is how a .env containing
-# live credentials was once committed. scripts/check_secrets.py enforces this.
+# live credentials was once committed. scripts/ci/check_secrets.py enforces this.
 
 # Secrets - never commit
 .env

@@ -9,8 +9,8 @@ kestrel.agent.
 
 Requires the REST tier to be running (make api / .\\tasks.ps1 api).
 
-    python scripts/agent_demo.py
-    python scripts/agent_demo.py --prompt "What are my options?"
+    python scripts/dev/agent_demo.py
+    python scripts/dev/agent_demo.py --prompt "What are my options?"
 
 The agent may rebook the passenger, which uses up part of the disruption. That
 is the point of the demonstration; the next run resets when nothing usable is
@@ -21,10 +21,13 @@ import argparse
 import asyncio
 import os
 import sys
+from pathlib import Path
 
 import asyncpg
 
-from reset_demo import ensure_fresh
+# reset_demo lives in scripts/data
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "data"))
+from reset_demo import ensure_fresh  # noqa: E402
 
 
 async def pick_passenger() -> asyncpg.Record:

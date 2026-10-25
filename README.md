@@ -98,7 +98,7 @@ Apply the migrations **in this order** in the Supabase SQL editor:
 
 | # | File | Contents |
 |---|---|---|
-| 000 | `db/migrations/000_base_schema.sql` | Tables and enum types. Generate with `python scripts/export_schema.py`. |
+| 000 | `db/migrations/000_base_schema.sql` | Tables and enum types. Generate with `python scripts/data/export_schema.py`. |
 | 001 | `db/migrations/001_baseline_reaccommodate_passenger_atomic.sql` | The procedure as first deployed. Kept unchanged as an auditable baseline. |
 | 002 | `db/migrations/002_indexes_and_rls.sql` | Indexes for auth, seat claiming and alternative search; row-level security. |
 | 003 | `db/migrations/003_reaccommodate_passenger_atomic_v2.sql` | The corrected procedure. |
@@ -125,7 +125,7 @@ Migration 003 corrects five defects in 001, each covered by a test in
 ### Generating test data
 
 ```bash
-python scripts/dataset_generator.py --truncate --days 7 --seed 42
+python scripts/data/generate_dataset.py --truncate --days 7 --seed 42
 ```
 
 Produces roughly 1,020 flights, 171,500 seats, 141,600 bookings and 75,500
@@ -133,7 +133,7 @@ passengers, then cancels the three busiest future flights. `--days 3` gives a
 smaller dataset. `--dry-run` prints the shape without touching the database.
 
 **Between test runs**, do not regenerate — run `make reset`
-(`python scripts/reset_demo.py`) instead. It applies
+(`python scripts/data/reset_demo.py`) instead. It applies
 `db/seeds/reset_demo_state.sql`, which reschedules flights relative to `now()`,
 frees seats, restores bookings and re-creates the disruption, and it preserves
 `audit_logs`.
@@ -190,7 +190,7 @@ Integration tests run inside a transaction that is always rolled back.
 |---|---|
 | `.pre-commit-config.yaml` | ruff, line-ending and large-file checks, private-key detection, and the project secret scan — before each commit |
 | `.github/workflows/ci.yml` | Secret scan, lint and tests on every push and pull request |
-| `scripts/check_secrets.py` | Fails if a `.env` is tracked, a `.gitignore` is UTF-16, or any tracked file contains a credential |
+| `scripts/ci/check_secrets.py` | Fails if a `.env` is tracked, a `.gitignore` is UTF-16, or any tracked file contains a credential |
 
 The secret scan exists because of a real incident: the project `.gitignore`
 files were saved as UTF-16, which Git cannot parse, so every rule in them was

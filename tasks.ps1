@@ -106,7 +106,7 @@ function Invoke-Web {
     } finally {
         Pop-Location
     }
-    & $Py scripts/serve_web.py --port 8080
+    & $Py scripts/dev/serve_web.py --port 8080
 }
 
 function Invoke-Android {
@@ -147,10 +147,10 @@ switch ($Target) {
     "lint"     { & $Py -m ruff check . }
     "fmt"      { & $Py -m ruff check . --fix; & $Py -m ruff format . }
     "test"     { & $Py -m pytest -v tests/unit }
-    "test-all" { & $Py scripts/reset_demo.py --if-stale; & $Py -m pytest -v }
-    "smoke"    { & $Py scripts/smoke_test.py }
-    "data"     { & $Py scripts/dataset_generator.py --truncate --days 7 --seed 42 }
-    "reset"    { & $Py scripts/reset_demo.py }
+    "test-all" { & $Py scripts/data/reset_demo.py --if-stale; & $Py -m pytest -v }
+    "smoke"    { & $Py scripts/evaluation/smoke_test.py }
+    "data"     { & $Py scripts/data/generate_dataset.py --truncate --days 7 --seed 42 }
+    "reset"    { & $Py scripts/data/reset_demo.py }
     "api"      { & $Py -m uvicorn kestrel.api.main:app --reload }
     "agent-api" { & $Py -m uvicorn kestrel.agent_service:app --port 8001 --reload }
     "web"      { Invoke-Web }
@@ -167,10 +167,10 @@ switch ($Target) {
                  Start-Process powershell -ArgumentList "-NoExit", "-Command", "& '$Py' -m uvicorn kestrel.api.main:app --reload"
                  Start-Process powershell -ArgumentList "-NoExit", "-Command", "& '$Py' -m uvicorn kestrel.agent_service:app --port 8001 --reload"
                  Write-Host "REST tier on :8000, agent service on :8001 (two new windows)" }
-    "ingest"   { & $Py scripts/ingest_policies.py }
-    "evaluate" { & $Py scripts/evaluate_retrieval.py }
-    "loadtest" { & $Py scripts/load_test.py --passengers 12 }
-    "agent"    { & $Py scripts/agent_demo.py }
+    "ingest"   { & $Py scripts/data/ingest_policies.py }
+    "evaluate" { & $Py scripts/evaluation/evaluate_retrieval.py }
+    "loadtest" { & $Py scripts/evaluation/load_test.py --passengers 12 }
+    "agent"    { & $Py scripts/dev/agent_demo.py }
     "hooks"    { & $Py -m pre_commit install; & $Py -m pre_commit run --all-files }
     "clean"    { Get-ChildItem -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
                  Remove-Item -Recurse -Force .pytest_cache, .ruff_cache, src\*.egg-info -ErrorAction SilentlyContinue }

@@ -18,7 +18,7 @@ Binary classification on real, labelled, tabular data. Primary target
 three or more hours late).
 
 **Why not train on Kestrel's own data:** the synthetic dataset is produced by
-rules written in `scripts/dataset_generator.py`. A model trained on it would
+rules written in `scripts/data/generate_dataset.py`. A model trained on it would
 rediscover those rules, and its accuracy would mean nothing. The trained
 component must use real data; the synthetic data stays for testing the
 re-accommodation system.

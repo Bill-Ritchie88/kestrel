@@ -12,7 +12,7 @@ of its own stale constants rather than a defect in the procedure. Every
 identifier below is discovered at runtime, and if the demo data has gone
 stale it is reset first (see reset_demo.py).
 
-    python scripts/smoke_test.py
+    python scripts/evaluation/smoke_test.py
 """
 
 import asyncio
@@ -23,9 +23,11 @@ from pathlib import Path
 import asyncpg
 from dotenv import load_dotenv
 
-from reset_demo import ensure_fresh
+# reset_demo lives in scripts/data
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "data"))
+from reset_demo import ensure_fresh  # noqa: E402
 
-load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 

@@ -12,8 +12,8 @@ db/seeds/reset_demo_state.sql re-anchors the schedule to now() and recreates
 the disruption. This script runs it - unconditionally, or with --if-stale only
 when the demo can no longer work - so nobody has to remember to.
 
-    python scripts/reset_demo.py              # always reset
-    python scripts/reset_demo.py --if-stale   # reset only if the demo is unusable
+    python scripts/data/reset_demo.py              # always reset
+    python scripts/data/reset_demo.py --if-stale   # reset only if the demo is unusable
 
 audit_logs is preserved either way. smoke_test.py and agent_demo.py import
 ensure_fresh() from here and call it themselves.
@@ -28,7 +28,7 @@ from pathlib import Path
 import asyncpg
 from dotenv import load_dotenv
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 RESET_SQL = PROJECT_ROOT / "db" / "seeds" / "reset_demo_state.sql"
 load_dotenv(dotenv_path=PROJECT_ROOT / ".env")
 
@@ -79,7 +79,7 @@ async def ensure_fresh(conn: asyncpg.Connection, force: bool = False) -> asyncpg
             raise RuntimeError(
                 "Even after a reset no disrupted passenger has an alternative "
                 "flight with a free seat. Regenerate the dataset with more --days "
-                "(scripts/dataset_generator.py)."
+                "(scripts/data/generate_dataset.py)."
             )
         print("[OK]   Demo data reset.")
     return case

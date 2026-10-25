@@ -50,12 +50,12 @@ the schedule produces:
 Supabase's free tier allows 500 MB, so 14 days is the practical ceiling.
 
 Usage:
-    python scripts/dataset_generator.py --dry-run                 # plan only, no DB
-    python scripts/dataset_generator.py --truncate --days 7 --seed 42
+    python scripts/data/generate_dataset.py --dry-run                 # plan only, no DB
+    python scripts/data/generate_dataset.py --truncate --days 7 --seed 42
 
 --truncate deletes every row in pnr_bookings, seats, flights, passengers and,
 if they exist, vouchers and audit_logs. Between test runs do not regenerate:
-run scripts/reset_demo.py, which keeps the audit log.
+run scripts/data/reset_demo.py, which keeps the audit log.
 """
 
 import argparse
@@ -72,7 +72,7 @@ import asyncpg
 from dotenv import load_dotenv
 from faker import Faker
 
-ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 load_dotenv(dotenv_path=ENV_PATH)
 
 # ---------------------------------------------------------------------------

@@ -3,7 +3,7 @@
 
 -r requirements.txt
 
-# Test data generation (scripts/dataset_generator.py)
+# Test data generation (scripts/data/generate_dataset.py)
 faker>=30.0
 
 pytest>=8.3

@@ -966,7 +966,7 @@ DEFAULT_PROMPT = "My flight was cancelled. Please get me on the next available f
 def main(argv: list[str] | None = None) -> None:
     # The passenger is supplied by the caller rather than hardcoded: a fixed PNR
     # vanishes the moment the dataset is regenerated or reset. The agent has no
-    # database access to look one up itself, by design - scripts/agent_demo.py
+    # database access to look one up itself, by design - scripts/dev/agent_demo.py
     # finds a disrupted passenger and calls main() with it.
     parser = argparse.ArgumentParser(description="Run the Kestrel agent for one passenger.")
     parser.add_argument("--pnr", required=True, help="Booking reference, e.g. IZNXXV")

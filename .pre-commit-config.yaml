@@ -39,7 +39,7 @@ repos:
     hooks:
       - id: kestrel-secret-scan
         name: Kestrel secret scan
-        entry: python scripts/check_secrets.py
+        entry: python scripts/ci/check_secrets.py
         language: system
         pass_filenames: false
         always_run: true

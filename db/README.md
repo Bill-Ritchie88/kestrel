@@ -11,7 +11,7 @@ integrity · DR-xx data requirements.
 
 | Migration | What it adds | Sprint | Requirement |
 |---|---|---|---|
-| `000_base_schema.sql` | Base schema (bookings, passengers, flights, seats, vouchers, audit), exported from the deployed database by `scripts/export_schema.py` | 1 (committed in 2) | NFR-03 |
+| `000_base_schema.sql` | Base schema (bookings, passengers, flights, seats, vouchers, audit), exported from the deployed database by `scripts/data/export_schema.py` | 1 (committed in 2) | NFR-03 |
 | `001_baseline_reaccommodate_passenger_atomic.sql` | The rebooking procedure exactly as deployed on 12 September 2026, kept as the baseline | 1 | FR-03, FR-07 |
 | `002_indexes_and_rls.sql` | Indexes for sign-in and flight lookups; row-level security on the passenger tables | 1 | FR-01, FR-06 |
 | `003_reaccommodate_passenger_atomic_v2.sql` | Corrected atomic rebooking procedure (same signature as 001) | 1 | FR-07, NFR-03 |

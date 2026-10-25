@@ -5,8 +5,8 @@ Signs in as the demo booking, calls each passenger endpoint --rest-runs times
 and asks the assistant each question --chat-runs times, then prints p50 / p90
 / max per call and writes a Markdown report.
 
-    python scripts/measure_latency.py
-    python scripts/measure_latency.py --label "Phase 2" --out docs/sprint-2/performance/2-warm-pool-trip-endpoint-gzip.md
+    python scripts/evaluation/measure_latency.py
+    python scripts/evaluation/measure_latency.py --label "Phase 2" --out docs/sprint-2/performance/2-warm-pool-trip-endpoint-gzip.md
 
 DEMO_PNR / DEMO_SURNAME choose the booking (default A27Z99 / Edwards). Both
 services must be running (.\\tasks.ps1 up). Nothing is rebooked; a question
@@ -37,7 +37,7 @@ import httpx
 
 from kestrel import config  # noqa: F401  - loads .env
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 REST_CALLS = [
     ("GET /api/me", "/api/me"),
@@ -217,7 +217,7 @@ def report(rows: list[Row], meta: dict) -> str:
     lines = [
         f"# Kestrel latency - {meta['label']}",
         "",
-        f"Measured {meta['at']} with `scripts/measure_latency.py` on {meta['host']}.",
+        f"Measured {meta['at']} with `scripts/evaluation/measure_latency.py` on {meta['host']}.",
         f"REST tier {meta['api']}, agent service {meta['agent']}; booking {meta['pnr']} "
         f"({meta['booking_status']}). REST calls x{meta['rest_runs']}, assistant questions "
         f"x{meta['chat_runs']} ({meta['chat_pause']:.0f} s apart, for the model's per-minute "

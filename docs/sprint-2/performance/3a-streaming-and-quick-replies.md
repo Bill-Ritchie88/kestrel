@@ -1,6 +1,6 @@
 # Kestrel latency - Phase 3 (streaming, CONTEXT, quick replies, faster policy search)
 
-Measured 2026-10-18 15:20 E. Africa Standard Time with `scripts/measure_latency.py` on Windows 11, Python 3.13.14.
+Measured 2026-10-18 15:20 E. Africa Standard Time with `scripts/evaluation/measure_latency.py` on Windows 11, Python 3.13.14.
 REST tier http://127.0.0.1:8000, agent service http://127.0.0.1:8001; booking A27Z99 (DISRUPTED). REST calls x3, assistant questions x1 (20 s apart, for the model's per-minute quota), one after another over one keep-alive connection.
 
 Assistant model: `gemini-3.8-flash`.

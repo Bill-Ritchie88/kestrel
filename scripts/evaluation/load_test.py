@@ -18,7 +18,7 @@ Everything runs inside transactions that are rolled back, so the demo data
 is unchanged. Each worker holds its transaction open until all have finished,
 which is what makes the contention real.
 
-    python scripts/load_test.py --passengers 12
+    python scripts/evaluation/load_test.py --passengers 12
 
 Keep --passengers within the Supabase session pooler's connection limit (15 on
 the free plan, minus the API's own pool).
@@ -102,7 +102,7 @@ async def main(n: int) -> int:
     )
     await conn.close()
     if not rows:
-        print("[ERROR] No disrupted passengers with an alternative. Run: python scripts/reset_demo.py")
+        print("[ERROR] No disrupted passengers with an alternative. Run: python scripts/data/reset_demo.py")
         return 1
     flight_id, free = target["alt_id"], target["free_seats"]
     print(

@@ -4,7 +4,7 @@
 -- Puts the system back into a known pre-disruption state with every flight in
 -- the future, so a demonstration behaves identically whether it runs today or
 -- in three months. Operates on rows already present; use
--- scripts/dataset_generator.py to create them in the first place.
+-- scripts/data/generate_dataset.py to create them in the first place.
 --
 -- No PNR, flight or seat identifier is hardcoded. The disruption is chosen by
 -- booking volume at runtime, so this file survives a regenerated dataset.

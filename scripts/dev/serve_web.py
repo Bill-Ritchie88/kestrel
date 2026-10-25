@@ -1,8 +1,8 @@
 """
 Serve the Flutter release build (client/build/web) for demos.
 
-    python scripts/serve_web.py            # http://localhost:8080
-    python scripts/serve_web.py --port 8081 --root client/build/web
+    python scripts/dev/serve_web.py            # http://localhost:8080
+    python scripts/dev/serve_web.py --port 8081 --root client/build/web
 
 `flutter run` is for development: it serves an unoptimised debug build.
 This serves what `flutter build web --release` produced, the way a static
@@ -43,7 +43,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_WEB_ROOT = ROOT / "client" / "build" / "web"
 
 # Explicit, because Python's mimetypes reads the Windows registry, which can

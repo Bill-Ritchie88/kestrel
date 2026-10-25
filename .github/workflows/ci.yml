@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Fail if a credential or .env is tracked
-        run: python scripts/check_secrets.py
+        run: python scripts/ci/check_secrets.py
 
   lint:
     name: Lint
@@ -67,7 +67,7 @@ jobs:
         run: |
           set -o pipefail
           if ! flutter test --reporter expanded 2>&1 | tee test.log; then
-            python3 ../scripts/ci_annotate_flutter.py test.log
+            python3 ../scripts/ci/annotate_flutter.py test.log
             exit 1
           fi
       # Proves the web build compiles; the output is not published.

@@ -33,10 +33,10 @@ Run commands changed with the package layout:
 | Task | Command |
 |---|---|
 | API | `uvicorn kestrel.api.main:app --reload` (`make api` / `.\tasks.ps1 api`) |
-| Agent demo | `python scripts/agent_demo.py` (`make agent`) |
+| Agent demo | `python scripts/dev/agent_demo.py` (`make agent`) |
 | Agent, chosen passenger | `python -m kestrel.agent --pnr <PNR> --last-name <surname>` |
-| Smoke test | `python scripts/smoke_test.py` (`make smoke`) |
-| Reset demo data | `python scripts/reset_demo.py` (`make reset`) |
+| Smoke test | `python scripts/evaluation/smoke_test.py` (`make smoke`) |
+| Reset demo data | `python scripts/data/reset_demo.py` (`make reset`) |
 
 ---
 
@@ -61,7 +61,7 @@ them (token lifetime is fixed at 15 minutes in `auth.py`).
 ## 3. Demo data that cannot go stale
 
 The schedule covers a fixed window, so it expires; rebooking passengers during
-demos also uses the disruption up. `scripts/reset_demo.py` applies
+demos also uses the disruption up. `scripts/data/reset_demo.py` applies
 `db/seeds/reset_demo_state.sql`, and with `--if-stale` only when no disrupted
 passenger has an alternative flight with a free seat departing at least six
 hours out. `make smoke`, `make agent` and `make test-all` run that check first,
@@ -76,7 +76,7 @@ Nairobi local times, and cancels three flights to match the generator. It keeps
 ## 4. Dataset generator v2
 
 The v2 generator, previously only a Colab notebook, is now
-`scripts/dataset_generator.py`, with a `--dry-run` option. Generated on
+`scripts/data/generate_dataset.py`, with a `--dry-run` option. Generated on
 1 October with `--truncate --days 7 --seed 42` (`audit_logs` backed up first,
 since `--truncate` clears it):
 

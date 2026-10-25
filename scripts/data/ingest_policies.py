@@ -6,10 +6,10 @@ article-sized chunks (kestrel.policy.corpus), embeds the chunks with Gemini and
 upserts them into policy_chunks (migration 005). Chunks whose text has not
 changed since the last run are not re-embedded, so re-running is cheap.
 
-    python scripts/ingest_policies.py --dry-run     # chunk only: no network, no database
-    python scripts/ingest_policies.py               # embed and load
-    python scripts/ingest_policies.py --prune       # also delete chunks no longer in the sources
-    python scripts/ingest_policies.py --manifest    # record the SHA-256 of each source file
+    python scripts/data/ingest_policies.py --dry-run     # chunk only: no network, no database
+    python scripts/data/ingest_policies.py               # embed and load
+    python scripts/data/ingest_policies.py --prune       # also delete chunks no longer in the sources
+    python scripts/data/ingest_policies.py --manifest    # record the SHA-256 of each source file
 """
 
 import argparse
@@ -31,7 +31,7 @@ from kestrel.policy.embeddings import (
     to_pgvector,
 )
 
-SOURCES_DIR = Path(__file__).resolve().parent.parent / "data" / "policy" / "sources"
+SOURCES_DIR = Path(__file__).resolve().parents[2] / "data" / "policy" / "sources"
 
 
 async def ingest(prune: bool) -> int:

@@ -43,7 +43,7 @@ async def rebooked(conn):
         ORDER BY alt.departure_time LIMIT 1
     """)
     if row is None:
-        pytest.skip("Demo data is stale. Run: python scripts/reset_demo.py")
+        pytest.skip("Demo data is stale. Run: python scripts/data/reset_demo.py")
     result = await conn.fetchrow(
         "SELECT * FROM reaccommodate_passenger_atomic($1, $2, 'PYTEST')", row["pnr_code"], row["target"]
     )
@@ -82,7 +82,7 @@ async def test_handoff_case_round_trip(conn, rebooked):
 async def test_policy_store_returns_clauses_in_similarity_order(conn):
     count = await conn.fetchval("SELECT count(*) FROM policy_chunks")
     if not count:
-        pytest.skip("Policy corpus not ingested. Run: python scripts/ingest_policies.py")
+        pytest.skip("Policy corpus not ingested. Run: python scripts/data/ingest_policies.py")
     probe = await conn.fetchval("SELECT embedding::text FROM policy_chunks LIMIT 1")
     rows = await conn.fetch("SELECT * FROM match_policy_chunks($1, 3)", probe)
     sims = [r["similarity"] for r in rows]
