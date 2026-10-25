@@ -24,7 +24,7 @@ Every question is embedded once and its top-3 clauses retrieved. Then:
 
 The tau with the highest F0.5 on the calibration split is chosen; precision,
 recall, F0.5 and the false hand-off rate are reported on the test split at
-that tau. Results are written to docs/testing/retrieval-evaluation.md and a
+that tau. Results are written to docs/sprint-2/03-retrieval-evaluation.md and a
 CSV of every question's scores, so the report quotes measured numbers only.
 
     python scripts/evaluation/evaluate_retrieval.py
@@ -43,7 +43,7 @@ from kestrel.policy.retriever import PolicyRetriever
 
 ROOT = Path(__file__).resolve().parents[2]
 QUESTIONS = ROOT / "data" / "eval" / "policy_questions.csv"
-OUT_DIR = ROOT / "docs" / "testing"
+OUT_DIR = ROOT / "docs" / "sprint-2"
 BETA = 0.5
 
 
@@ -130,7 +130,7 @@ async def main() -> int:
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-    with (OUT_DIR / "retrieval-evaluation-scores.csv").open("w", encoding="utf-8", newline="") as f:
+    with (OUT_DIR / "03-retrieval-evaluation-scores.csv").open("w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
         w.writerow(["question_id", "split", "in_scope", "topic", "top_similarity", "hit_at_3",
                     "top3_refs", "top3_sims", "question"])  # fmt: skip
@@ -167,7 +167,7 @@ async def main() -> int:
         "|---|---|---|---|---|---|",
         *[line(m) for m in sweep],
     ]
-    (OUT_DIR / "retrieval-evaluation.md").write_text("\n".join(report) + "\n", encoding="utf-8")
+    (OUT_DIR / "03-retrieval-evaluation.md").write_text("\n".join(report) + "\n", encoding="utf-8")
     print("\n".join(report[:12]))
     print(f"\n[OK]   Set POLICY_TAU={best['tau']:.2f} in .env and restart the API.")
     return 0
