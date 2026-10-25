@@ -5,79 +5,66 @@ import 'package:speech_to_text/speech_to_text.dart';
 
 import '../api/models.dart';
 import '../format.dart';
-import '../state/session.dart';
+import '../state/chat.dart';
+import '../state/shell.dart';
+import '../state/trip.dart';
 import '../theme.dart';
-import '../widgets/api_error.dart';
 import '../widgets/cards.dart';
 import '../widgets/common.dart';
 import '../widgets/layout.dart';
-import 'alternatives_screen.dart';
+import '../widgets/next_steps.dart';
+import '../widgets/system_state.dart';
 import 'confirm_screen.dart';
-import 'handoff_screen.dart';
-import 'vouchers_screen.dart';
 
-/// M05 / M08 · Chat (UC2, UC3). Each turn goes to the agent service (:8001),
-/// which calls the REST tier's tools with this passenger's token. The
+/// M05 / M08 · Assistant (UC2, UC3). Each turn goes to the agent service
+/// (:8001), which calls the REST tier's tools with this passenger's token. The
 /// structured results it returns (flights, rebooking, clauses, entitlements,
 /// hand-off) are drawn as cards under the reply, from the same data the
 /// model saw, so the screen never depends on the model's wording for facts.
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key});
+  const ChatScreen({super.key, required this.chat, required this.onPerson});
+  final ChatController chat;
+  final VoidCallback onPerson;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _Message {
-  _Message.user(this.text)
-      : fromUser = true,
-        events = const [],
-        totalMs = null,
-        error = null;
-  _Message.agent(this.text, {this.events = const [], this.totalMs})
-      : fromUser = false,
-        error = null;
-  _Message.error(String this.error)
-      : fromUser = false,
-        text = '',
-        events = const [],
-        totalMs = null;
+/// The conversation card's widest (about 70 characters per bubble line).
+const _chatCardMax = 880.0;
 
-  final bool fromUser;
-  final String text;
-  final List<AgentEvent> events;
-  final int? totalMs;
-  final String? error;
-}
-
-const _quickReplies = [
-  'Find me another flight',
-  'What am I entitled to?',
-  'Can I get a refund instead?',
+/// The chips until the server's suggestions arrive (with the trip). Those
+/// with an intent are answered by the agent service straight from the
+/// matching tool, with no model call (instant); the refund question needs
+/// the policy, so it goes to the model.
+final _quickReplies = [
+  Suggestion({'label': 'Find me another flight', 'intent': 'alternatives'}),
+  Suggestion({'label': 'What am I entitled to?', 'intent': 'entitlements'}),
+  Suggestion({'label': 'Can I get a refund instead?', 'message': 'Can I get a refund instead?'}),
 ];
 
 class _ChatScreenState extends State<ChatScreen> {
-  final _messages = <_Message>[];
   final _input = TextEditingController();
   // Enter sends, Shift+Enter starts a new line - what people expect from a
   // chat box in a browser.
   late final _inputFocus = FocusNode(onKeyEvent: _onComposerKey);
   final _scroll = ScrollController();
   final _speech = SpeechToText();
-  bool _busy = false;
   bool _speechReady = false;
   bool _listening = false;
-  String? _lastFailed;
+
+  ChatController get _chat => widget.chat;
 
   @override
   void initState() {
     super.initState();
-    final booking = SessionScope.read(context).booking;
-    if (booking != null) _messages.add(_Message.agent(_greeting(booking)));
+    _chat.addListener(_onChat);
+    _scrollToEnd(animate: false);
   }
 
   @override
   void dispose() {
+    _chat.removeListener(_onChat);
     _speech.cancel();
     _input.dispose();
     _inputFocus.dispose();
@@ -85,46 +72,20 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
-  /// UC2 opening message, written from the booking rather than by the model:
-  /// it is instant and states only facts the REST tier returned.
-  static String _greeting(Booking b) {
-    final f = b.original;
-    final name = b.firstName.isNotEmpty ? b.firstName : b.lastName;
-    if (b.isRebooked && b.current != null) {
-      final c = b.current!;
-      return 'Hello $name. You\'re booked on ${c.number} to ${city(f.destination)}, '
-          'departing ${dayLabel(c.departureLocal)} at ${hhmm(c.departureLocal)} local time, '
-          'seat ${b.seat ?? '-'}. I can explain your vouchers and rights, '
-          'or put you through to a person.';
-    }
-    if (b.isDisrupted) {
-      final reason = reasonText[f.disruptionReason];
-      return 'Hello $name, I\'m sorry. Your flight ${f.number} from ${city(f.origin)} '
-          'to ${city(f.destination)} on ${dayLabel(f.departureLocal)} at '
-          '${hhmm(f.departureLocal)} has been cancelled'
-          '${reason == null ? '' : ' because of $reason'}. '
-          'I can find you another flight, tell you what you\'re entitled to, '
-          'or put you through to a person.';
-    }
-    return 'Hello $name. Your booking ${b.pnr} is ${titleCase(b.status)}. '
-        'Ask me anything about your trip.';
+  void _onChat() {
+    if (!mounted) return;
+    setState(() {});
+    _scrollToEnd();
   }
 
-  List<Map<String, String>> _history() => [
-        for (final m in _messages)
-          if (m.error == null && m.text.isNotEmpty)
-            {'role': m.fromUser ? 'user' : 'assistant', 'content': m.text},
-      ];
-
-  void _scrollToEnd() {
+  void _scrollToEnd({bool animate = true}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scroll.hasClients) return;
       final reduce = MediaQuery.of(context).disableAnimations;
       final end = _scroll.position.maxScrollExtent;
-      reduce
+      reduce || !animate
           ? _scroll.jumpTo(end)
-          : _scroll.animateTo(end,
-              duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+          : _scroll.animateTo(end, duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
     });
   }
 
@@ -139,45 +100,34 @@ class _ChatScreenState extends State<ChatScreen> {
     return KeyEventResult.ignored;
   }
 
-  Future<void> _send([String? preset]) async {
+  void _ask(String text, {String? intent}) => _send(text, intent);
+
+  /// Chips show under the greeting and under each finished reply.
+  bool get _showChips {
+    final last = _chat.messages.isEmpty ? null : _chat.messages.last;
+    return last == null || (!last.fromUser && !last.writing);
+  }
+
+  /// The server's next steps, or the defaults until they arrive; "Talk to a
+  /// person" stays reachable unless a case is already open.
+  List<Suggestion> get _chips {
+    final list = _chat.suggestions.isNotEmpty ? _chat.suggestions : _quickReplies;
+    final hasPerson = list.any((s) => s.intent == 'person' || s.intent == 'case');
+    return [
+      ...list,
+      if (!hasPerson) Suggestion({'label': 'Talk to a person', 'intent': 'person'}),
+    ];
+  }
+
+  /// [intent] only from a chip; what the passenger types never has one.
+  Future<void> _send([String? preset, String? intent]) async {
     final text = (preset ?? _input.text).trim();
-    if (text.isEmpty || _busy) return;
-    // Read the session before any await, so no BuildContext crosses an
-    // async gap.
-    final session = SessionScope.read(context);
+    if (text.isEmpty || _chat.busy) return;
     if (_listening) await _speech.stop();
     if (!mounted) return;
-    final history = _history();
-    setState(() {
-      _messages.add(_Message.user(text));
-      _busy = true;
-      _listening = false;
-      _lastFailed = null;
-      _input.clear();
-    });
-    _scrollToEnd();
-    try {
-      final reply = await session.api.chat(text, history.length > 20
-          ? history.sublist(history.length - 20)
-          : history);
-      if (!mounted) return;
-      setState(() => _messages.add(
-          _Message.agent(reply.reply, events: reply.events, totalMs: reply.totalMs)));
-      // A rebooking changes the booking shown everywhere else.
-      if (reply.events.any((e) => e.type == 'rebooked')) await session.refresh();
-    } catch (e) {
-      if (!mounted) return;
-      final msg = handleApiError(context, e);
-      if (msg != null) {
-        setState(() {
-          _messages.add(_Message.error(msg));
-          _lastFailed = text;
-        });
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-      _scrollToEnd();
-    }
+    setState(() => _listening = false);
+    if (preset == null) _input.clear();
+    await _chat.send(text, intent: intent);
   }
 
   Future<void> _toggleMic() async {
@@ -217,52 +167,28 @@ class _ChatScreenState extends State<ChatScreen> {
     _input.selection = TextSelection.collapsed(offset: _input.text.length);
   }
 
-  Future<void> _talkToPerson() async {
-    final session = SessionScope.read(context);
-    final lastQuestion = _messages.lastWhere((m) => m.fromUser,
-        orElse: () => _Message.user('')).text;
-    setState(() => _busy = true);
-    try {
-      final c = await session.api.requestPerson(lastQuestion.isEmpty
-          ? 'Passenger asked to speak to a person from the chat screen.'
-          : 'Passenger asked for a person. Last question: $lastQuestion');
-      if (!mounted) return;
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => HandoffScreen(initial: c)));
-    } catch (e) {
-      if (!mounted) return;
-      final msg = handleApiError(context, e);
-      if (msg != null) setState(() => _messages.add(_Message.error(msg)));
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  void _open(Widget screen) =>
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
-
-  void _signOut() {
-    SessionScope.read(context).signOut();
-  }
+  Future<void> _choose(Flight f) =>
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => ConfirmScreen(flight: f)));
 
   // -- Event cards ------------------------------------------------------------
 
   List<Widget> _eventCards(AgentEvent e) {
     final d = e.data;
+    final shell = ShellScope.read(context);
     switch (e.type) {
       case 'alternatives':
         final flights = asList(d['alternatives']).map(Flight.new).toList();
         if (flights.isEmpty) return const [];
         return [
           for (final (i, f) in flights.take(3).indexed)
-            FlightOptionCard(
-              flight: f,
-              recommended: i == 0,
-              onSelect: () => _open(ConfirmScreen(flight: f)),
-            ),
+            FlightOptionCard(flight: f, recommended: i == 0, onSelect: () => _choose(f)),
           if (flights.length > 3)
-            _LinkButton(
-              label: 'See all ${flights.length} flights',
-              onPressed: () => _open(const AlternativesScreen()),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: LinkButton(
+                label: 'See all ${flights.length} flights',
+                onPressed: () => shell.go(Section.flights),
+              ),
             ),
         ];
       case 'rebooked':
@@ -272,7 +198,7 @@ class _ChatScreenState extends State<ChatScreen> {
             .where((v) => v.isLive)
             .toList();
         return [
-          if (booking.isNotEmpty) BookingCard(booking: Booking(booking)),
+          if (booking.isNotEmpty) TripTicket(booking: Booking(booking), compact: true),
           for (final v in vouchers) VoucherCard(voucher: v),
         ];
       case 'policy':
@@ -284,9 +210,9 @@ class _ChatScreenState extends State<ChatScreen> {
         final decision = EntitlementDecision(asMap(d['decision']));
         return [
           EntitlementsCard(decision: decision),
-          _LinkButton(
-            label: 'Open my vouchers',
-            onPressed: () => _open(const VouchersScreen()),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: LinkButton(label: 'Open my vouchers', onPressed: () => shell.go(Section.vouchers)),
           ),
         ];
       case 'handoff':
@@ -298,26 +224,28 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  Widget _messageView(_Message m) {
+  Widget _messageView(ChatMessage m) {
     if (m.error != null) {
-      return ErrorNotice(
-        message: m.error!,
-        onRetry: (_lastFailed != null && !_busy && identical(m, _messages.last))
-            ? () {
-                final text = _lastFailed!;
-                setState(() => _messages
-                  ..remove(m)
-                  ..removeLast()); // the failed user message is re-sent below
-                _send(text);
-              }
-            : null,
-      );
+      final canRetry = _chat.lastFailed != null && !_chat.busy && identical(m, _chat.messages.last);
+      // 503/504: the agent service is down or overloaded, but the rest of the
+      // app is not - say so, and offer the ways forward.
+      if (m.status == 503 || m.status == 504) {
+        return SystemStateCard.assistantBusy(
+          onRetry: canRetry ? () => _chat.retry(m) : null,
+          onTrip: () => ShellScope.read(context).go(Section.trip),
+          onPerson: widget.onPerson,
+        );
+      }
+      return ErrorNotice(message: m.error!, onRetry: canRetry ? () => _chat.retry(m) : null);
     }
     final cards = [for (final e in m.events) ..._eventCards(e)];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (m.text.isNotEmpty) ChatBubble(text: m.text, fromUser: m.fromUser),
+        // A streamed reply: what the assistant is doing until its first
+        // words, then the words as they arrive, with a cursor.
+        if (m.writing && m.text.isEmpty) ThinkingBubble(label: m.working),
+        if (m.text.isNotEmpty) ChatBubble(text: m.text, fromUser: m.fromUser, writing: m.writing),
         if (m.totalMs != null)
           Padding(
             padding: const EdgeInsets.only(left: 36, top: K.s1),
@@ -332,134 +260,141 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final booking = SessionScope.of(context).booking;
+    // The trip panel waits for the whole trip (it draws the ticket).
+    final booking = TripScope.of(context).trip?.booking;
     return LayoutBuilder(builder: (context, c) {
-      // In a desktop browser the booking and the actions sit in a side panel
-      // next to the conversation; on a phone they move into the app bar and
-      // the top of the conversation.
-      final wide = c.maxWidth >= Breakpoints.wide;
-      final conversation = _conversation(booking, showBooking: !wide, autofocus: wide);
-      return Scaffold(
-        appBar: AppBar(
-          titleSpacing: K.s4,
-          title: const Row(children: [
-            KestrelMark(size: 32),
-            SizedBox(width: K.s3),
-            Text('Kestrel'),
-          ]),
-          actions: wide
-              ? null
-              : [
-                  IconButton(
-                    tooltip: 'Other flights',
-                    icon: const Icon(Icons.flight_takeoff),
-                    onPressed: () => _open(const AlternativesScreen()),
+      // Beside the sidebar the conversation sits in a card, with the trip in
+      // a panel next to it when there is room; on a phone it fills the screen.
+      final inCard = MediaQuery.sizeOf(context).width >= Breakpoints.wide;
+      final withPanel = inCard && c.maxWidth >= Breakpoints.twoPane + 120;
+      final conversation = _conversation(inCard: inCard);
+      if (!inCard) return conversation;
+      final panel = withPanel && booking != null;
+      // The card stops at a readable width; on a very wide screen the card
+      // and the trip panel stay together in the middle.
+      return Padding(
+        padding: const EdgeInsets.all(K.s5),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: _chatCardMax + (panel ? K.s5 + 340 : 0)),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Expanded(
+                child: Container(
+                  clipBehavior: Clip.antiAlias,
+                  decoration: BoxDecoration(
+                    color: K.surface,
+                    borderRadius: BorderRadius.circular(K.radiusLg),
+                    border: Border.all(color: K.hairline),
                   ),
-                  IconButton(
-                    tooltip: 'Vouchers',
-                    icon: const Icon(Icons.card_giftcard),
-                    onPressed: () => _open(const VouchersScreen()),
-                  ),
-                  PopupMenuButton<String>(
-                    tooltip: 'More',
-                    onSelected: (v) {
-                      if (v == 'person') {
-                        _talkToPerson();
-                      } else {
-                        _signOut();
-                      }
-                    },
-                    itemBuilder: (_) => const [
-                      PopupMenuItem(value: 'person', child: Text('Talk to a person')),
-                      PopupMenuItem(value: 'signout', child: Text('Sign out')),
-                    ],
-                  ),
-                ],
-        ),
-        body: SafeArea(
-          child: wide
-              ? Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                  SizedBox(
-                    width: 380,
-                    child: _SidePanel(
-                      booking: booking,
-                      busy: _busy,
-                      onFlights: () => _open(const AlternativesScreen()),
-                      onVouchers: () => _open(const VouchersScreen()),
-                      onPerson: _talkToPerson,
-                      onSignOut: _signOut,
-                    ),
-                  ),
-                  const VerticalDivider(width: 1, color: K.hairline),
-                  Expanded(child: conversation),
-                ])
-              : conversation,
+                  child: conversation,
+                ),
+              ),
+              if (panel) ...[
+                const SizedBox(width: K.s5),
+                SizedBox(width: 340, child: _TripPanel(booking: booking, onAsk: _send, onPerson: widget.onPerson)),
+              ],
+            ]),
+          ),
         ),
       );
     });
   }
 
-  Widget _conversation(Booking? booking, {required bool showBooking, required bool autofocus}) {
+  Widget _conversation({required bool inCard}) {
+    final t = Theme.of(context).textTheme;
+    final busy = _chat.busy;
     return LayoutBuilder(builder: (context, c) {
-      final padding = pagePadding(c.maxWidth, maxWidth: Breakpoints.chat, top: K.s2);
+      final padding = inCard
+          ? const EdgeInsets.fromLTRB(K.s5, K.s4, K.s5, K.s4)
+          : pagePadding(c.maxWidth, maxWidth: Breakpoints.chat, top: K.s3);
       return Column(children: [
+        if (inCard)
+          Container(
+            padding: const EdgeInsets.fromLTRB(K.s5, K.s4, K.s3, K.s4),
+            decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: K.hairline))),
+            child: Row(children: [
+              const KestrelMark(size: 38),
+              const SizedBox(width: K.s3),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Semantics(header: true, child: Text('Kestrel assistant', style: t.titleMedium)),
+                  Row(children: [
+                    Container(
+                        width: 7,
+                        height: 7,
+                        decoration: const BoxDecoration(color: K.teal, shape: BoxShape.circle)),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text('Online · answers from your booking and the conditions of carriage',
+                          overflow: TextOverflow.ellipsis,
+                          style: t.bodySmall?.copyWith(color: K.textSecondary)),
+                    ),
+                  ]),
+                ]),
+              ),
+              IconButton(
+                tooltip: 'Talk to a person',
+                icon: const Icon(Icons.support_agent, color: K.textSecondary),
+                onPressed: widget.onPerson,
+              ),
+            ]),
+          ),
         Expanded(
           child: ListView(
             controller: _scroll,
             padding: padding,
             children: [
-              if (showBooking && booking != null) BookingCard(booking: booking),
-              for (final (i, m) in _messages.indexed)
+              if (_chat.continuingFrom != null)
                 Padding(
-                  padding: EdgeInsets.only(top: i == 0 && !showBooking ? 0 : K.s4),
+                  padding: const EdgeInsets.only(bottom: K.s4),
+                  child: _Continuing(since: _chat.continuingFrom!, onStartOver: _chat.startOver),
+                ),
+              for (final (i, m) in _chat.messages.indexed)
+                Padding(
+                  padding: EdgeInsets.only(top: i == 0 ? 0 : K.s4),
                   child: _messageView(m),
                 ),
-              if (_busy)
-                const Padding(padding: EdgeInsets.only(top: K.s4), child: ThinkingBubble()),
             ],
           ),
         ),
-        // Quick replies wrap onto a second line rather than scrolling
-        // sideways, so "Talk to a person" is never hidden off-screen.
-        if (!_busy && _messages.length <= 1)
+        // Next steps (the server's suggestions after each reply) wrap onto a
+        // second line rather than scrolling sideways, so "Talk to a person"
+        // is never hidden off-screen.
+        if (!busy && _showChips)
           Padding(
             padding: EdgeInsets.fromLTRB(padding.left, 0, padding.right, K.s2),
-            child: Wrap(
-              spacing: K.s2,
-              runSpacing: K.s2,
-              children: [
-                for (final q in _quickReplies)
-                  ActionChip(
-                    label: Text(q),
-                    onPressed: () => _send(q),
-                    backgroundColor: K.surface,
-                    side: const BorderSide(color: K.crimsonStroke),
-                    materialTapTargetSize: MaterialTapTargetSize.padded,
-                  ),
-                ActionChip(
-                  avatar: const Icon(Icons.support_agent, size: 18),
-                  label: const Text('Talk to a person'),
-                  onPressed: _talkToPerson,
-                  backgroundColor: K.surface,
-                  side: const BorderSide(color: K.hairline),
-                  materialTapTargetSize: MaterialTapTargetSize.padded,
-                ),
-              ],
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Wrap(
+                spacing: K.s2,
+                runSpacing: K.s2,
+                children: [
+                  for (final s in _chips)
+                    ActionChip(
+                      avatar: suggestionIcon(s) == null ? null : Icon(suggestionIcon(s), size: 18),
+                      label: Text(s.label),
+                      onPressed: () => runSuggestion(context, s, ask: _ask),
+                      backgroundColor: K.inset,
+                      side: BorderSide(color: s.intent == 'person' ? K.hairline : K.crimsonStroke),
+                      materialTapTargetSize: MaterialTapTargetSize.padded,
+                    ),
+                ],
+              ),
             ),
           ),
         DecoratedBox(
-          decoration: const BoxDecoration(
-            color: K.base,
-            border: Border(top: BorderSide(color: K.hairline)),
+          decoration: BoxDecoration(
+            color: inCard ? K.surface : K.base,
+            border: const Border(top: BorderSide(color: K.hairline)),
           ),
           child: CentredBar(
-            maxWidth: Breakpoints.chat + 2 * K.s4,
+            maxWidth: inCard ? double.infinity : Breakpoints.chat + 2 * K.s4,
             child: _Composer(
               controller: _input,
               focusNode: _inputFocus,
-              busy: _busy,
+              busy: busy,
               listening: _listening,
-              autofocus: autofocus,
+              autofocus: inCard,
               onSend: _send,
               onMic: _toggleMic,
             ),
@@ -470,102 +405,87 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 }
 
-/// Desktop side panel: the passenger's booking and every action one click
-/// away, so the conversation column can stay at a readable width.
-class _SidePanel extends StatelessWidget {
-  const _SidePanel({
-    required this.booking,
-    required this.busy,
-    required this.onFlights,
-    required this.onVouchers,
-    required this.onPerson,
-    required this.onSignOut,
-  });
-  final Booking? booking;
-  final bool busy;
-  final VoidCallback onFlights, onVouchers, onPerson, onSignOut;
+/// Above a conversation brought back from an earlier visit.
+class _Continuing extends StatelessWidget {
+  const _Continuing({required this.since, required this.onStartOver});
+  final String since;
+  final Future<void> Function() onStartOver;
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-    return ColoredBox(
-      color: K.void_,
-      child: ListView(
-        padding: const EdgeInsets.all(K.s5),
-        children: [
-          const SectionLabel('Your booking'),
-          const SizedBox(height: K.s3),
-          if (booking != null) BookingCard(booking: booking!),
-          const SizedBox(height: K.s5),
-          const SectionLabel('What you can do'),
-          const SizedBox(height: K.s3),
-          SecondaryButton(
-            label: 'See other flights',
-            icon: Icons.flight_takeoff,
-            onPressed: onFlights,
-          ),
-          const SizedBox(height: K.s3),
-          SecondaryButton(
-            label: 'Vouchers & entitlements',
-            icon: Icons.card_giftcard,
-            onPressed: onVouchers,
-          ),
-          const SizedBox(height: K.s3),
-          SecondaryButton(
-            label: 'Talk to a person',
-            icon: Icons.support_agent,
-            onPressed: busy ? null : onPerson,
-          ),
-          const SizedBox(height: K.s5),
-          Row(children: [
-            const Icon(Icons.lock_outline, size: 16, color: K.textSecondary),
-            const SizedBox(width: K.s2),
-            Expanded(
-              child: Text(
-                'Your session ends 15 minutes after sign-in. Nothing is saved in this browser.',
-                style: t.bodySmall?.copyWith(color: K.textSecondary),
-              ),
-            ),
-          ]),
-          const SizedBox(height: K.s2),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: onSignOut,
-              icon: const Icon(Icons.logout, size: 18),
-              label: const Text('Sign out'),
-              style: TextButton.styleFrom(
-                foregroundColor: K.textSecondary,
-                minimumSize: const Size(K.touch, K.touch),
-              ),
-            ),
-          ),
-        ],
-      ),
+    return Semantics(
+      container: true,
+      child: Row(children: [
+        const Icon(Icons.history, size: 18, color: K.textSecondary),
+        const SizedBox(width: K.s2),
+        Expanded(
+          child: Text('Continuing your conversation from ${dayTime(since)}',
+              style: t.bodySmall?.copyWith(color: K.textSecondary)),
+        ),
+        LinkButton(label: 'Start over', icon: Icons.restart_alt, onPressed: onStartOver),
+      ]),
     );
   }
 }
 
-class _LinkButton extends StatelessWidget {
-  const _LinkButton({required this.label, required this.onPressed});
-  final String label;
-  final VoidCallback onPressed;
+/// Beside the conversation on a wide screen: the trip, questions to try,
+/// and a person.
+class _TripPanel extends StatelessWidget {
+  const _TripPanel({required this.booking, required this.onAsk, required this.onPerson});
+  final Booking booking;
+  final Future<void> Function([String?, String?]) onAsk;
+  final VoidCallback onPerson;
 
   @override
-  Widget build(BuildContext context) => Align(
-        alignment: Alignment.centerLeft,
-        child: TextButton.icon(
-          onPressed: onPressed,
-          icon: const Icon(Icons.arrow_forward, size: 18),
-          label: Text(label),
-          style: TextButton.styleFrom(
-              foregroundColor: K.glow, minimumSize: const Size(K.touch, K.touch)),
-        ),
-      );
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    return ListView(children: [
+      const SectionLabel('Your trip'),
+      const SizedBox(height: K.s3),
+      TripTicket(booking: booking, compact: true),
+      const SizedBox(height: K.s5),
+      KCard(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Semantics(header: true, child: Text('Try asking', style: t.titleMedium)),
+          const SizedBox(height: K.s2),
+          for (final (q, intent) in [
+            if (booking.isDisrupted) ('Find me another flight', 'alternatives'),
+            ('What am I entitled to?', 'entitlements'),
+            ('Can I get a refund instead?', null),
+            ('Can I take a later flight?', null),
+          ])
+            Padding(
+              padding: const EdgeInsets.only(top: K.s2),
+              child: Material(
+                color: K.inset,
+                borderRadius: BorderRadius.circular(12),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () => onAsk(q, intent),
+                  child: SizedBox(
+                    height: K.touch,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: K.s3),
+                      child: Row(children: [
+                        Expanded(child: Text(q, style: t.bodyMedium)),
+                        const Icon(Icons.north_east, size: 16, color: K.glow),
+                      ]),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ]),
+      ),
+      const SizedBox(height: K.s4),
+      SecondaryButton(label: 'Talk to a person', icon: Icons.support_agent, onPressed: onPerson),
+    ]);
+  }
 }
 
-/// Input bar: text field, dictation and send. Dictation fills the field so
-/// the passenger can check the words before sending.
+/// Input bar: dictation, text and send. Dictation fills the field so the
+/// passenger can check the words before sending.
 class _Composer extends StatelessWidget {
   const _Composer({
     required this.controller,
@@ -585,7 +505,7 @@ class _Composer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(K.s3, K.s2, K.s3, K.s3),
+      padding: const EdgeInsets.fromLTRB(K.s3, K.s3, K.s3, K.s3),
       child: Row(children: [
         IconButton(
           tooltip: listening ? 'Stop dictation' : 'Speak your question',

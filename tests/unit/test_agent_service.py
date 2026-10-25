@@ -1,5 +1,7 @@
 """The chat endpoint the Flutter client talks to (agent service, port 8001)."""
 
+import json
+
 import httpx
 from fastapi.testclient import TestClient
 
@@ -85,4 +87,6 @@ def test_successful_turn_is_logged_with_timing(monkeypatch, tmp_path):
     import json as _json
 
     rec = _json.loads((tmp_path / "agent-turns.jsonl").read_text(encoding="utf-8"))
-    assert rec["message"] == "hi" and "total_ms" in rec and rec["tools"] == []
+    assert "total_ms" in rec and rec["tools"] == []
+    # Issue #11: timings and names only, never the passenger's words.
+    assert "message" not in rec and '"hi"' not in json.dumps(rec)
