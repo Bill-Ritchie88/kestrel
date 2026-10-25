@@ -61,3 +61,15 @@ data/policy/sources/*.txt
 
 # Agent turn log (timing evidence; kept locally)
 logs/
+
+# Generated or third-party folders that must never be committed (issue #18)
+site/
+graphify-out/
+.claude/skills/
+node_modules/
+
+# personal and source files, not part of the repo
+/CV.pdf
+/Kenya Airways PLC _ Conditions of Carriage.pdf
+/.mcp.json
+*.bak
