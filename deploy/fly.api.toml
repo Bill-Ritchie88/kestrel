@@ -1,0 +1,38 @@
+# Fly.io: the Kestrel REST tier in Frankfurt (fra). Deploy from the repo root:
+#
+#   fly deploy . --config deploy/fly.api.toml
+#
+# Paths below are relative to the working directory (the repo root).
+# Rename `app` if the name is taken.
+
+app = "kestrel-api"
+primary_region = "fra"
+
+[build]
+  dockerfile = "deploy/Dockerfile"
+  ignorefile = "deploy/.dockerignore"
+
+[env]
+  SERVICE = "api"
+  PORT = "8080"
+  LOG_TO_STDOUT = "1"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # One machine kept running: the database pool stays warm (Phase 2) and
+  # the login throttle and policy-vector cache live in memory.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/health"
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "20s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

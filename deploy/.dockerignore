@@ -1,0 +1,40 @@
+# What never goes into a Kestrel image or a build upload. Used by Fly.io
+# (fly.*.toml: build.ignorefile). The Dockerfile copies only requirements.txt
+# and src/ in any case.
+
+# Secrets and local settings
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+service-account*.json
+
+# Local tools and working files
+.venv/
+venv/
+.git/
+.github/
+.claude/
+.sprint2-tmp/
+logs/
+.mcp.json
+
+# The Flutter client is hosted separately (deploy/README.md, "Website")
+client/
+site/
+
+# Caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+build/
+dist/
+node_modules/
+
+# Source documents that are not redistributed
+*.pdf
+data/policy/sources/*.txt
