@@ -202,7 +202,14 @@ async def test_confirmed_booking_cannot_be_moved_for_free(conn, disrupted):
 async def test_cancelled_target_rejection_is_audited(conn, disrupted):
     """003 returned early without an audit row for a cancelled target."""
     booking, _ = disrupted
-    cancelled = await conn.fetchval("SELECT flight_id FROM flights WHERE status = 'CANCELLED' LIMIT 1")
+    # On the booking's own route: since migration 011 a cancelled flight on
+    # another route is refused as DIFFERENT_ROUTE before its status is read.
+    cancelled = await conn.fetchval(
+        """SELECT flight_id FROM flights
+           WHERE status = 'CANCELLED' AND origin = $1 AND destination = $2
+           ORDER BY departure_time DESC LIMIT 1""",
+        booking["origin"], booking["destination"],
+    )  # fmt: skip
     await conn.fetchrow(
         "SELECT * FROM reaccommodate_passenger_atomic($1, $2, $3)",
         booking["pnr_code"], cancelled, "PYTEST",
@@ -213,3 +220,58 @@ async def test_cancelled_target_rejection_is_audited(conn, disrupted):
         booking["pnr_code"],
     )
     assert reason in ("FLIGHT_NOT_SCHEDULED", "ALREADY_ON_TARGET_FLIGHT")
+
+
+# ---------------------------------------------------------------------------
+# Migration 011: the target flight must be on the booking's route.
+# ---------------------------------------------------------------------------
+
+
+async def test_flight_on_another_route_is_refused_and_audited(conn, disrupted):
+    """Issue #2: a flight id from another route (visible in /api/me and the
+    alternatives list) used to be accepted; only the AI prompt stood in the way."""
+    booking, _ = disrupted
+    other = await conn.fetchrow(
+        """SELECT flight_id, origin, destination FROM flights
+           WHERE status = 'SCHEDULED' AND departure_time > now()
+             AND (origin, destination) <> ($1, $2)
+             AND EXISTS (SELECT 1 FROM seats s WHERE s.flight_id = flights.flight_id
+                         AND s.status = 'AVAILABLE')
+           LIMIT 1""",
+        booking["origin"], booking["destination"],
+    )  # fmt: skip
+    if other is None:
+        pytest.skip("No scheduled flight on another route.")
+    before = await conn.fetchrow(
+        "SELECT booking_status, reaccommodated_flight_id, assigned_seat_id FROM pnr_bookings WHERE pnr_code = $1",
+        booking["pnr_code"],
+    )
+    row = await conn.fetchrow(
+        "SELECT * FROM reaccommodate_passenger_atomic($1, $2, $3)",
+        booking["pnr_code"], other["flight_id"], "PYTEST",
+    )  # fmt: skip
+    assert row["success"] is False
+    assert row["message"].startswith(f"Target flight flies {other['origin']} to {other['destination']}")
+    reason = await conn.fetchval(
+        """SELECT details->>'reason' FROM audit_logs
+           WHERE pnr_code = $1 ORDER BY timestamp DESC LIMIT 1""",
+        booking["pnr_code"],
+    )
+    assert reason == "DIFFERENT_ROUTE"
+    after = await conn.fetchrow(
+        "SELECT booking_status, reaccommodated_flight_id, assigned_seat_id FROM pnr_bookings WHERE pnr_code = $1",
+        booking["pnr_code"],
+    )
+    assert after == before  # nothing moved
+
+
+def test_the_api_recognises_the_procedures_route_message():
+    """The message the API maps to X-Refusal-Reason: DIFFERENT_ROUTE is the
+    one migration 011 writes."""
+    from pathlib import Path
+
+    from kestrel.api.main import refusal_reason
+
+    sql = (Path(__file__).parents[2] / "db/migrations/011_rebooking_same_route.sql").read_text()
+    assert "'Target flight flies %s to %s;" in sql
+    assert refusal_reason("Target flight flies NBO to LHR; this booking ...") == "DIFFERENT_ROUTE"
