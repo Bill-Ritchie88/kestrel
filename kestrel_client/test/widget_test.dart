@@ -7,23 +7,23 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:kestrel_app/api/kestrel_api.dart';
-import 'package:kestrel_app/auth/account_auth.dart';
-import 'package:kestrel_app/format.dart';
-import 'package:kestrel_app/main.dart';
-import 'package:kestrel_app/api/models.dart';
-import 'package:kestrel_app/calendar.dart';
-import 'package:kestrel_app/state/recommend.dart';
-import 'package:kestrel_app/state/session.dart';
-import 'package:kestrel_app/state/trip.dart';
-import 'package:kestrel_app/theme.dart';
-import 'package:kestrel_app/widgets/cards.dart';
-import 'package:kestrel_app/widgets/common.dart';
-import 'package:kestrel_app/widgets/google_logo.dart';
-import 'package:kestrel_app/widgets/otp_boxes.dart';
-import 'package:kestrel_app/widgets/public.dart';
-import 'package:kestrel_app/widgets/shell.dart';
-import 'package:kestrel_app/widgets/skeleton.dart';
+import 'package:kestrel_client/api/kestrel_api.dart';
+import 'package:kestrel_client/auth/account_auth.dart';
+import 'package:kestrel_client/format.dart';
+import 'package:kestrel_client/main.dart';
+import 'package:kestrel_client/api/models.dart';
+import 'package:kestrel_client/calendar.dart';
+import 'package:kestrel_client/state/recommend.dart';
+import 'package:kestrel_client/state/session.dart';
+import 'package:kestrel_client/state/trip.dart';
+import 'package:kestrel_client/theme.dart';
+import 'package:kestrel_client/widgets/cards.dart';
+import 'package:kestrel_client/widgets/common.dart';
+import 'package:kestrel_client/widgets/google_logo.dart';
+import 'package:kestrel_client/widgets/otp_boxes.dart';
+import 'package:kestrel_client/widgets/public.dart';
+import 'package:kestrel_client/widgets/shell.dart';
+import 'package:kestrel_client/widgets/skeleton.dart';
 
 /// A booking shaped exactly like GET /api/me (src/kestrel/api/booking.py).
 final _me = {
@@ -682,7 +682,8 @@ void main() {
 
   testWidgets('brand line, app title and disclaimer', (tester) async {
     await _pump(tester, _Backend().client, screen: laptop);
-    expect(tester.widget<MaterialApp>(find.byType(MaterialApp)).title, 'Kestrel — disruption assistant');
+    expect(tester.widget<MaterialApp>(find.byType(MaterialApp)).title,
+        kIsWeb ? 'Kestrel Web — disruption assistant' : 'Kestrel App');
     expect(find.text('KENYA AIRWAYS'), findsNothing);
     expect(find.textContaining(disclaimer), findsOneWidget); // Home footer
 

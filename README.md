@@ -20,7 +20,7 @@ tier.
 
 ```
 Flutter web client  ->  REST tier (FastAPI, :8000)  ->  PostgreSQL (Supabase)
- client/                 kestrel.api.main              reaccommodate_passenger_atomic
+ kestrel_client/         kestrel.api.main              reaccommodate_passenger_atomic
  Home, Help, sign-in,    sign-in, trip, rebooking,     row-level locks, audit_logs
  passenger app,          vouchers, policy search,      pgvector policy clauses
  staff desk              hand-off cases, staff queue
@@ -38,7 +38,7 @@ in `kestrel.entitlements` decide what the passenger gets.
 
 | Part | Where | Responsibility |
 |---|---|---|
-| Client | `client/` | Home, Help, sign-in (Google, emailed code, booking reference, staff key), the passenger app (My trip, Assistant, Flights, Vouchers, Help) and the staff desk. See `client/README.md`. |
+| Client | `kestrel_client/` | Home, Help, sign-in (Google, emailed code, booking reference, staff key), the passenger app (My trip, Assistant, Flights, Vouchers, Help) and the staff desk. See `kestrel_client/README.md`. |
 | REST tier | `src/kestrel/api/` | Endpoints, session tokens and login limits (`auth.py`), account sign-in (`accounts.py`), booking and vouchers (`booking.py`), flight reasons (`explain.py`), conversation memory (`history.py`) |
 | Agent service | `src/kestrel/agent_service.py`, `agent.py` | Chat turns, streamed; quick replies without the model; frustration hand-off (`frustration.py`) |
 | Rules | `src/kestrel/entitlements.py`, `handoff.py`, `policy/` | Entitlements, hand-off cases, policy retrieval |
@@ -151,8 +151,8 @@ alternative flight (`reset_demo.py --if-stale`).
 From the repo root, in PowerShell:
 
 ```powershell
-.	asks.ps1 start    # REST tier on :8000 and agent service on :8001 (two windows)
-.	asks.ps1 web      # release build of the client, served on http://localhost:8080
+.\tasks.ps1 start    # REST tier on :8000 and agent service on :8001 (two windows)
+.\tasks.ps1 web      # release build of the client, served on http://localhost:8080
 ```
 
 Open http://localhost:8080. Every screen shows data from the REST tier, which
@@ -164,8 +164,24 @@ Once, before the first run: add `http://localhost:8080` to `ALLOWED_ORIGINS`
 in `.env`, and `http://localhost:8080/**` to Supabase → Authentication → URL
 Configuration → Redirect URLs (for Google sign-in).
 
-`.	asks.ps1 down` stops both services. `/health` on :8000 should report
-`database: connected`. Other targets: `.	asks.ps1 help`.
+`.\tasks.ps1 down` stops both services. `/health` on :8000 should report
+`database: connected`. Other targets: `.\tasks.ps1 help`.
+
+### Kestrel Web and Kestrel App
+
+One Flutter codebase in `kestrel_client/` gives two products:
+
+- **Kestrel Web**, the website: `.\tasks.ps1 web` builds it and serves it on
+  http://localhost:8080.
+- **Kestrel App**, the Android app: with the services running and an Android
+  emulator open, from `kestrel_client`:
+
+  ```powershell
+  flutter run -d emulator --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...
+  ```
+
+  The two values are the same `SUPABASE_URL` and `SUPABASE_ANON_KEY` as in
+  `.env`; without them only booking-reference sign-in works.
 
 ---
 
@@ -204,7 +220,7 @@ mistake fail the build.
 
 ```
 kestrel/
-├── client/                       Flutter web client (see client/README.md)
+├── kestrel_client/               Kestrel Web and Kestrel App, one Flutter codebase (see kestrel_client/README.md)
 ├── src/kestrel/                  Python package (pip install -e .)
 │   ├── api/                      REST tier (uvicorn kestrel.api.main:app)
 │   ├── agent.py, agent_service.py  Agent tier (uvicorn kestrel.agent_service:app)

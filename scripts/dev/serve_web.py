@@ -1,8 +1,8 @@
 """
-Serve the Flutter release build (client/build/web) for demos.
+Serve the Flutter release build (kestrel_client/build/web) for demos.
 
     python scripts/dev/serve_web.py            # http://localhost:8080
-    python scripts/dev/serve_web.py --port 8081 --root client/build/web
+    python scripts/dev/serve_web.py --port 8081 --root kestrel_client/build/web
 
 `flutter run` is for development: it serves an unoptimised debug build.
 This serves what `flutter build web --release` produced, the way a static
@@ -44,7 +44,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_WEB_ROOT = ROOT / "client" / "build" / "web"
+DEFAULT_WEB_ROOT = ROOT / "kestrel_client" / "build" / "web"
 
 # Explicit, because Python's mimetypes reads the Windows registry, which can
 # map .js to text/plain - and a browser refuses to run a module served so.

@@ -42,11 +42,11 @@ These are the issues found when Ponytail (`/ponytail-audit`), Agent Skills (`/ag
 ### 5. Assistant uses out-of-date booking details for 120 s after a rebooking in the app
 - **Where:** `src/kestrel/agent_service.py:141-195` (the `_briefings` cache)
 - **Found by:** PT, AS, BR
-- **Problem:** The cache is only cleared when the *assistant* rebooks or hands over. The confirm screen rebooks through the REST API directly (`client/lib/screens/confirm_screen.dart:43`). For up to 2 minutes the assistant still thinks the passenger is DISRUPTED, shows the wrong suggestion chips, and could rebook a second time.
+- **Problem:** The cache is only cleared when the *assistant* rebooks or hands over. The confirm screen rebooks through the REST API directly (`kestrel_client/lib/screens/confirm_screen.dart:43`). For up to 2 minutes the assistant still thinks the passenger is DISRUPTED, shows the wrong suggestion chips, and could rebook a second time.
 - **Fix:** Simplest: drop the cache and fetch `/api/trip` on every turn. That removes about 40 lines and costs about 0.5 s per turn. Otherwise, include the booking's `updated_at` in the cache key.
 
 ### 6. Staff queue loses new cases after 200 ✅
-- **Where:** `client/lib/screens/staff_desk_screen.dart:67`, `src/kestrel/handoff.py:77`
+- **Where:** `kestrel_client/lib/screens/staff_desk_screen.dart:67`, `src/kestrel/handoff.py:77`
 - **Found by:** BR
 - **Problem:** The staff desk loads `status: 'ALL', limit: 200` and filters on the device, but the server sorts oldest first (`ORDER BY created_at ASC`). Once 200 cases exist, every new open case is cut off. Low-similarity policy questions open cases automatically, so this fills up quickly.
 - **Fix:** Ask the server for `status: 'OPEN'`, or sort newest first.
@@ -58,7 +58,7 @@ These are the issues found when Ponytail (`/ponytail-audit`), Agent Skills (`/ag
 - **Fix:** Only count a repeat when both messages have at least 4 words. Add a test: history `[user "yes", assistant "Book KQ101?"]` plus the message `"yes"`.
 
 ### 8. The app's own suggestion chips count as repeated questions
-- **Where:** `src/kestrel/frustration.py:72-78` (`earlier_signal`), `src/kestrel/suggestions.py:71`, `client/lib/state/chat.dart:185-202`
+- **Where:** `src/kestrel/frustration.py:72-78` (`earlier_signal`), `src/kestrel/suggestions.py:71`, `kestrel_client/lib/state/chat.dart:185-202`
 - **Found by:** PT, BR
 - **Problem:** Chip taps are saved as ordinary user messages, and the same chip (for example the refund one) is offered again after it's answered. `earlier_signal` re-checks the whole history, so a repeated chip label counts as an earlier sign of frustration. The next mild complaint then skips the apology and opens a case.
 - **Fix:** Keep the chip labels in one set (`QUICK_REPLY_LABELS`) and have `earlier_signal` skip messages with exactly those texts. Count a policy answer as shown. Add a test with the three-tap history.
@@ -124,7 +124,7 @@ These are the issues found when Ponytail (`/ponytail-audit`), Agent Skills (`/ag
 - **Fix:** Add them to `.gitignore`, or commit the site's source if it's meant to be in the repo.
 
 ### 19. The uncommitted change is too big for one commit
-- **Where:** branch `sprint-2/easyfly-layout`
+- **Where:** the Sprint 2 working branch
 - **Found by:** AS
 - **Problem:** About 12,000 lines across sign-in, performance, streaming, frustration and memory, the staff desk, the site, deployment and fonts.
 - **Fix:** Split it into one commit per feature, with items 1–5 on their own so they're easy to check.
@@ -169,7 +169,7 @@ These are the issues found when Ponytail (`/ponytail-audit`), Agent Skills (`/ag
 |---|---|---|
 | T1 | Agent Skills' `/review` clashes with Claude Code's built-in `/review` | Always use the full names: `/agent-skills:review`, `/agent-skills:spec`, and so on |
 | T2 | The Agent Skills install failed over SSH (no GitHub host key on this machine) | It worked after downloading over HTTPS. Set up GitHub SSH or a git HTTPS rewrite if updates fail |
-| T3 | Graphify's map is skewed by `.claude/skills/ui-ux-pro-max/` (446 of 2,678 nodes) | Add a `.graphifyignore` with `.claude/`, `site/`, `client/web/` and rebuild |
+| T3 | Graphify's map is skewed by `.claude/skills/ui-ux-pro-max/` (446 of 2,678 nodes) | Add a `.graphifyignore` with `.claude/`, `site/`, `kestrel_client/web/` and rebuild |
 | T4 | Graphify skipped all 12 SQL migrations | `pip install "graphifyy[sql]"` and rebuild |
 | T5 | Graphify's 110× token saving compares against reading the whole repo | Treat it as a best case, not a measured saving |
 | T6 | Agent Skills adds about 3,700 tokens to every session | Disable it in projects that don't need it |

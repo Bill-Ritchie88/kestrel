@@ -21,7 +21,7 @@ logs/
 .mcp.json
 
 # The Flutter client is hosted separately (deploy/README.md, "Website")
-client/
+kestrel_client/
 site/
 
 # Caches

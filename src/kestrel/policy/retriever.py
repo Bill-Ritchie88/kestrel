@@ -25,7 +25,7 @@ CACHE_SIZE = 256
 
 # Embedded when the REST tier starts, so the questions passengers ask most
 # (the assistant's quick replies and suggestions, and the rights questions in
-# the Help centre, client/lib/widgets/public.dart) never wait on the
+# the Help centre, kestrel_client/lib/widgets/public.dart) never wait on the
 # embedding API.
 COMMON_QUESTIONS = (
     "Can I get a refund instead?",

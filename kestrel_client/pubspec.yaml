@@ -1,5 +1,5 @@
-name: kestrel_app
-description: Project Kestrel - Kenya Airways disruption recovery client (FR-08).
+name: kestrel_client
+description: "Project Kestrel — Kestrel Web (website) and Kestrel App (Android), one Flutter codebase."
 publish_to: "none"
 version: 0.2.0+1
 

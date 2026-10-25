@@ -9,9 +9,8 @@ build/
 coverage/
 *.iml
 .idea/
-# Platform folders are generated locally by `flutter create .`
-# (see README) and are not part of the source.
-android/
+# Platform folders other than android/ are generated locally by
+# `flutter create .` (see README) and are not part of the source.
 ios/
 web/*
 !web/index.html

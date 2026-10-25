@@ -167,7 +167,7 @@ fly deploy . --config deploy/fly.agent.toml
 ```
 
 `fly deploy .` uploads this folder as the build context and builds `deploy/Dockerfile` on
-Fly's builders, leaving out what `deploy/.dockerignore` lists (`.env*`, `.venv`, `client/`,
+Fly's builders, leaving out what `deploy/.dockerignore` lists (`.env*`, `.venv`, `kestrel_client/`,
 `logs/`, `.sprint2-tmp/`, `.git`, caches, PDFs). Each `fly.*.toml` sets `primary_region = "fra"`,
 `SERVICE`, a `GET /health` check, and keeps one machine running (warm pool, warm model client).
 **Streaming:** Fly's proxy passes Server-Sent Events through unbuffered.
@@ -182,7 +182,7 @@ The Flutter site is static: build it with the two public URLs and the Supabase v
 upload the folder anywhere that serves files.
 
 ```powershell
-cd client
+cd kestrel_client
 flutter build web --wasm --release --no-web-resources-cdn `
   --dart-define=API_BASE=https://kestrel-api-....run.app `
   --dart-define=AGENT_BASE=https://kestrel-agent-....run.app `
@@ -191,13 +191,13 @@ flutter build web --wasm --release --no-web-resources-cdn `
 ```
 
 (`.\tasks.ps1 web` does the same for `localhost`; for hosting, pass the two URLs.) Then upload
-`client/build/web`, for example:
+`kestrel_client/build/web`, for example:
 
-- **Netlify Drop** - open <https://app.netlify.com/drop> and drag the `client/build/web` folder
+- **Netlify Drop** - open <https://app.netlify.com/drop> and drag the `kestrel_client/build/web` folder
   onto the page.
-- **Cloudflare Pages** (direct upload) - `npx wrangler pages deploy client/build/web
+- **Cloudflare Pages** (direct upload) - `npx wrangler pages deploy kestrel_client/build/web
   --project-name kestrel`.
-- **Firebase Hosting** - `firebase init hosting` (public directory `client/build/web`, single-page
+- **Firebase Hosting** - `firebase init hosting` (public directory `kestrel_client/build/web`, single-page
   app: yes), then `firebase deploy --only hosting`.
 
 The app has no deep links, so no rewrite rules are needed. Then:

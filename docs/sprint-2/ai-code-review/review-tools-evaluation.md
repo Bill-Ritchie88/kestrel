@@ -1,6 +1,6 @@
 # Plugin evaluation on Project Kestrel (18 Oct 2026)
 
-This report covers the four Claude Code plugins from the Instagram reel by @adilet.fndr: what was installed, whether each one worked, and what each found when run on Kestrel (`dev/kestrel`, branch `sprint-2/easyfly-layout`, including its uncommitted changes).
+This report covers the four Claude Code plugins from the Instagram reel by @adilet.fndr: what was installed, whether each one worked, and what each found when run on Kestrel (`dev/kestrel`, the Sprint 2 working branch, including its uncommitted changes).
 
 ## Summary
 
@@ -99,7 +99,7 @@ The built-in `/review` run (the first try) also found:
 - 👍 Fast, free and offline. `graphify update .` refreshes the graph after code changes at no cost.
 
 **To make it useful on Kestrel:**
-1. Add a `.graphifyignore` file containing `.claude/`, `site/` and `client/web/`, then rebuild.
+1. Add a `.graphifyignore` file containing `.claude/`, `site/` and `kestrel_client/web/`, then rebuild.
 2. Run `pip install "graphifyy[sql]"` to include the migrations.
 3. Optionally run `graphify claude install` in the repo. This edits the project's CLAUDE.md and adds a hook so Claude checks the graph before searching. I haven't done this because it changes your repo.
 4. Add `graphify-out/` to `.gitignore`, or commit it on purpose.

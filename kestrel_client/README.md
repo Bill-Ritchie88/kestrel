@@ -1,8 +1,8 @@
-# Kestrel passenger web app (Flutter)
+# Kestrel Web and Kestrel App (Flutter)
 
-Kestrel's client is built **web-first**: it runs in a desktop or laptop browser
-(a dashboard with a sidebar) and in a phone browser (one column with a tab
-bar). The same code can still be built for Android.
+One Flutter codebase, two products. **Kestrel Web** is the website: it runs in
+a desktop or laptop browser (a dashboard with a sidebar) and in a phone browser
+(one column with a tab bar). **Kestrel App** is the same code built for Android.
 
 The passenger interface for Project Kestrel (FR-08) and the staff disruption
 desk (FR-09). The layout is a flight-dashboard layout (sidebar, top bar,
@@ -37,7 +37,7 @@ concurrency test pass.
 ## Folder structure
 
 ```
-client/
+kestrel_client/
 ├── pubspec.yaml
 ├── analysis_options.yaml
 ├── lib/
@@ -71,18 +71,18 @@ client/
 From the repo root:
 
 ```powershell
-.	asks.ps1 start    # REST tier on :8000 and agent service on :8001
-.	asks.ps1 web      # release build, served on http://localhost:8080
+.\tasks.ps1 start    # REST tier on :8000 and agent service on :8001
+.\tasks.ps1 web      # release build, served on http://localhost:8080
 ```
 
 Then open **http://localhost:8080** and sign in as a guest with a disrupted
 booking's reference and surname. Reset the demo state with
-`.	asks.ps1 reset`.
+`.\tasks.ps1 reset`.
 
 For development (hot reload), with the services running:
 
 ```powershell
-cd client
+cd kestrel_client
 flutter pub get
 flutter analyze
 flutter test
@@ -159,37 +159,24 @@ out signs out of both.
       the deployed site's origin, and `io.kestrel.app://login-callback` for
       the Android app. Google returns the browser to the page's own origin.
 - [ ] **Android only**: Google comes back to the app through the deep link
-      `io.kestrel.app://login-callback`. Add this inside the main
-      `<activity>` in `android/app/src/main/AndroidManifest.xml`:
+      `io.kestrel.app://login-callback`, already declared on the main
+      `<activity>` in `android/app/src/main/AndroidManifest.xml`. The email
+      code needs no deep link.
 
-      ```xml
-      <intent-filter>
-        <action android:name="android.intent.action.VIEW"/>
-        <category android:name="android.intent.category.DEFAULT"/>
-        <category android:name="android.intent.category.BROWSABLE"/>
-        <data android:scheme="io.kestrel.app" android:host="login-callback"/>
-      </intent-filter>
-      ```
-
-      The email code needs no deep link.
-
-### Android (optional)
+### Kestrel App (Android)
 
 1. `flutter doctor --android-licenses` and accept.
-2. Create an emulator in Android Studio (Device Manager).
-3. Add to `android/app/src/main/AndroidManifest.xml`, above `<application>`:
+2. Create an emulator in Android Studio (Device Manager) and start it.
+3. With the services running (`.	asks.ps1 start`), from `kestrel_client`:
 
-   ```xml
-   <uses-permission android:name="android.permission.INTERNET"/>
-   <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-   <queries>
-     <intent><action android:name="android.speech.RecognitionService"/></intent>
-   </queries>
+   ```powershell
+   flutter run -d emulator --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...
    ```
 
-   and `android:usesCleartextTraffic="true"` on `<application>` (the local
-   services use plain HTTP).
-4. `flutter run -d emulator-5554`
+The Android project in `android/` is versioned: the manifest already has the
+internet and microphone permissions, the voice-recognition query,
+`usesCleartextTraffic` (the local services use plain HTTP) and the Google
+sign-in deep link. Application ID and namespace: `io.kestrel.app`.
 
 ### Demos: the release build on http://localhost:8080
 
@@ -214,7 +201,7 @@ renderer), other browsers the JavaScript one. In headless Chrome on the demo
 laptop the WebAssembly build showed its first screen in 0.85 s on a first
 visit and 0.29 s on a repeat visit (JavaScript: 1.65 s and 0.59 s).
 
-It then serves `client/build/web` on **http://localhost:8080** with
+It then serves `kestrel_client/build/web` on **http://localhost:8080** with
 `scripts/dev/serve_web.py` (Python standard library only): gzip for
 js/wasm/json/css/html, `no-cache` + ETag revalidation for `index.html` and
 for Flutter's own files (their names carry no content hash, so a repeat
@@ -244,7 +231,7 @@ Once, before the first demo:
 ```powershell
 flutter build web --release --no-web-resources-cdn
 ```
-The site is written to `client/build/web/` and can be served by any static
+The site is written to `kestrel_client/build/web/` and can be served by any static
 web server. Set the service addresses at build time with
 `--dart-define=API_BASE=... --dart-define=AGENT_BASE=...` (and
 `--dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...` for
@@ -266,7 +253,7 @@ a new line. The staff desk shows the case detail beside the table from 1100 px
 of content width; on a phone a case opens as its own page.
 
 `web/` (page title, description, icons, dark loading screen) is part of the
-source; `android/` is generated by `flutter create` when needed.
+source, and so is `android/` (Kestrel App).
 
 ## Accessibility (UI UX Pro Max checklist)
 

@@ -2,4 +2,4 @@
 # Flutter web shell, which skewed the map (T3).
 .claude/
 site/
-client/web/
+kestrel_client/web/

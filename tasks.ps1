@@ -99,7 +99,7 @@ function Invoke-Web {
         Write-Host "Add http://localhost:8080 to ALLOWED_ORIGINS in .env, then restart the services (.\tasks.ps1 up)" -ForegroundColor Yellow
     }
 
-    Push-Location client
+    Push-Location kestrel_client
     try {
         flutter build web --wasm --release --no-web-resources-cdn @defines
         if ($LASTEXITCODE -ne 0) { throw "flutter build web failed" }
@@ -132,7 +132,7 @@ function Invoke-Android {
     $devices = flutter devices --machine | Out-String | ConvertFrom-Json
     $device = ($devices | Where-Object { $_.targetPlatform -like "android*" } | Select-Object -First 1).id
     if (-not $device) { throw "No Android emulator running. Start one in Android Studio (Device Manager), then try again." }
-    Push-Location client
+    Push-Location kestrel_client
     try {
         flutter run -d $device @defines
     } finally {

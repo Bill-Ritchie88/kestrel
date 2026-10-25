@@ -36,6 +36,6 @@ class AppConfig {
   static bool get accountSignIn => supabaseUrl.isNotEmpty && supabaseAnonKey.isNotEmpty;
 
   /// Where Google sends the Android app back to (a deep link; see
-  /// client/README.md). In a browser it is the page's own address.
+  /// kestrel_client/README.md). In a browser it is the page's own address.
   static const appAuthRedirect = 'io.kestrel.app://login-callback';
 }
