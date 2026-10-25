@@ -98,7 +98,13 @@ class GeminiEmbedder:
         self.model = model
         self.dimensions = dimensions
         self._api_key = api_key
-        self._client = client or httpx.AsyncClient(timeout=30.0)
+        # One client for the life of the process, keeping its connection to
+        # the API open between questions: httpx closes an idle connection
+        # after 5 s by default, and a new TLS connection costs several round
+        # trips. Google may still close it sooner; httpx then reconnects.
+        self._client = client or httpx.AsyncClient(
+            timeout=30.0, limits=httpx.Limits(keepalive_expiry=300)
+        )
         self._max_retries = max_retries
         self._sleep = sleep
         self._on_wait = on_wait
@@ -123,9 +129,14 @@ class GeminiEmbedder:
         }
         url = f"{GEMINI_API_BASE}/models/{self.model}:batchEmbedContents"
         for attempt in range(self._max_retries + 1):
-            response = await self._client.post(
-                url, json=body, headers={"x-goog-api-key": self._api_key}
-            )
+            try:
+                response = await self._client.post(
+                    url, json=body, headers={"x-goog-api-key": self._api_key}
+                )
+            except httpx.HTTPError as exc:
+                # A network failure is the embedding service's failure: 502,
+                # and start-up pre-loading reports it (issue #22).
+                raise EmbeddingError(f"Embedding service unreachable: {type(exc).__name__}") from exc
             # 429 (quota) and 5xx are retried, waiting as long as the API asks;
             # anything else is a configuration error worth surfacing at once.
             if response.status_code == 429:

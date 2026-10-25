@@ -16,6 +16,8 @@ ios/
 web/*
 !web/index.html
 !web/manifest.json
+# Kestrel's own bootstrap: starts the app without Flutter's service worker.
+!web/flutter_bootstrap.js
 !web/favicon.png
 !web/icons/
 windows/

@@ -13,10 +13,11 @@ import json
 import secrets
 from datetime import UTC, datetime
 
+import asyncpg
+
 from kestrel.entitlements import (
     STORABLE_TYPES,
     DisruptionContext,
-    EntitlementDecision,
     evaluate,
     local_iso,
 )
@@ -33,6 +34,7 @@ SQL_LOAD_BOOKING = """
            o.status::text                   AS original_status,
            o.disruption_reason,
            o.aircraft_type                  AS original_aircraft,
+           o.cancelled_at,
            c.flight_id::text                AS current_flight_id,
            c.flight_number                  AS current_flight_number,
            c.departure_time                 AS current_departure,
@@ -97,9 +99,11 @@ _CODE_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ"
 
 
 def voucher_code(entitlement_type: str) -> str:
-    """e.g. KQ-MV-8842-XT. Random, so codes cannot be guessed from a PNR."""
+    """e.g. KQ-MV-8842-XTRB. Random, so codes cannot be guessed from a PNR.
+    About 3.3 billion codes per voucher type (issue #16: two letters gave 5.8
+    million, an 8% chance of a clash per 1,000 passengers)."""
     digits = f"{secrets.randbelow(10_000):04d}"
-    letters = "".join(secrets.choice(_CODE_LETTERS) for _ in range(2))
+    letters = "".join(secrets.choice(_CODE_LETTERS) for _ in range(4))
     return f"KQ-{_CODE_PREFIX[entitlement_type]}-{digits}-{letters}"
 
 
@@ -178,24 +182,37 @@ def context_from_booking(row, now: datetime | None = None) -> DisruptionContext:
         disruption_reason=row["disruption_reason"],
         new_departure=row["current_departure"],
         new_arrival=row["current_arrival"],
+        # When the flight was cancelled (migration 012's trigger), so the
+        # EU261 notice rule gives the same answer whatever day it is asked
+        # (issue #13). None only for a flight that is not cancelled.
+        notified_at=row.get("cancelled_at"),
         now=now or datetime.now(UTC),
     )
 
 
-async def evaluate_booking(conn, pnr_code: str) -> tuple[object, EntitlementDecision] | None:
-    row = await load_booking(conn, pnr_code)
-    if row is None:
-        return None
-    return row, evaluate(context_from_booking(row))
+ISSUE_ATTEMPTS = 3
 
 
 async def issue_entitlements(conn, pnr_code: str, actor: str) -> dict | None:
-    """Evaluate the rules and write the result to vouchers, in one transaction."""
+    """Evaluate the rules and write the result to vouchers, in one
+    transaction. A new voucher code that clashes with an existing one rolls
+    the transaction back; it is tried again with fresh codes, so the
+    passenger never silently loses their vouchers (issue #16)."""
+    for attempt in range(1, ISSUE_ATTEMPTS + 1):
+        try:
+            return await _issue_once(conn, pnr_code, actor)
+        except asyncpg.UniqueViolationError:
+            if attempt == ISSUE_ATTEMPTS:
+                raise
+    return None  # pragma: no cover
+
+
+async def _issue_once(conn, pnr_code: str, actor: str) -> dict | None:
     async with conn.transaction():
-        evaluated = await evaluate_booking(conn, pnr_code)
-        if evaluated is None:
+        row = await load_booking(conn, pnr_code)
+        if row is None:
             return None
-        _, decision = evaluated
+        decision = evaluate(context_from_booking(row))
         storable = [e for e in decision.entitlements if e.entitlement_type in STORABLE_TYPES]
         for e in storable:
             await conn.execute(

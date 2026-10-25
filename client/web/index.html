@@ -20,7 +20,7 @@
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <link rel="icon" type="image/png" href="favicon.png">
-  <title>Kestrel · Kenya Airways</title>
+  <title>Kestrel — disruption assistant</title>
   <link rel="manifest" href="manifest.json">
 
   <style>
@@ -55,8 +55,12 @@
     </p>
   </noscript>
   <script>
-    // Flutter dispatches this event when the first frame is on screen.
+    // Flutter dispatches this event when the first frame is on screen. The
+    // time is kept for measuring start-up (DevTools: performance.getEntriesByName
+    // ('kestrel-first-frame'), or window.kestrelFirstFrameMs).
     window.addEventListener('flutter-first-frame', function () {
+      window.kestrelFirstFrameMs = performance.now();
+      if (performance.mark) performance.mark('kestrel-first-frame');
       var el = document.getElementById('loading');
       if (!el) return;
       el.classList.add('done');

@@ -245,3 +245,72 @@ def test_labelled_question_set_is_well_formed():
     for split in ("calibration", "test"):
         part = [r for r in rows if r["split"] == split]
         assert any(r["in_scope"] == "1" for r in part) and any(r["in_scope"] == "0" for r in part)
+
+
+# -- performance plan, Phase 3: faster policy search --------------------------
+
+
+class _CountingEmbedder:
+    model = "fake"
+
+    def __init__(self):
+        self.calls: list[list[str]] = []
+
+    async def embed(self, texts, task):
+        self.calls.append(list(texts))
+        return [[1.0, 0.0, 0.0] for _ in texts]
+
+
+async def test_the_same_question_is_embedded_once():
+    embedder = _CountingEmbedder()
+    retriever = PolicyRetriever(embedder, tau=0.75)
+    await retriever.search(_FakeConn([0.8]), "Can I get a refund?")
+    await retriever.search(_FakeConn([0.8]), "  can i get a REFUND ")
+    assert embedder.calls == [["Can I get a refund?"]]
+    assert retriever.cache_hits == 1
+
+
+async def test_a_cache_hit_makes_no_second_http_call():
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json={"embeddings": [{"values": [3, 4, 0]}]})
+
+    retriever = PolicyRetriever(_gemini(handler), tau=0.75)
+    await retriever.search(_FakeConn([0.8]), "Do I get a meal?")
+    await retriever.search(_FakeConn([0.8]), "Do I get a meal?")
+    assert len(calls) == 1
+
+
+async def test_cache_keeps_the_most_recently_used_questions():
+    retriever = PolicyRetriever(_CountingEmbedder(), cache_size=2)
+    for q in ("a?", "b?", "a?", "c?"):
+        await retriever.vector(q)
+    assert list(retriever._vectors) == ["a", "c"]
+
+
+async def test_common_questions_are_embedded_in_one_request_at_startup():
+    embedder = _CountingEmbedder()
+    retriever = PolicyRetriever(embedder)
+    assert await retriever.warm(("What am I entitled to?", "Can I get a refund instead?")) == 2
+    assert await retriever.warm(("What am I entitled to?",)) == 0
+    await retriever.vector("what am i entitled to")
+    assert len(embedder.calls) == 1
+
+
+def test_embedder_keeps_its_connection_open_between_questions():
+    embedder = GeminiEmbedder("test-key")
+    assert embedder._client._transport._pool._keepalive_expiry >= 300
+
+
+async def test_a_network_error_is_an_embedding_error():
+    """Issue #22: httpx.HTTPError used to become a plain 500 and broke the
+    start-up pre-loading silently."""
+    from kestrel.policy.embeddings import EmbeddingError
+
+    def down(request):
+        raise httpx.ConnectError("no route to host", request=request)
+
+    with pytest.raises(EmbeddingError, match="unreachable"):
+        await _gemini(down).embed(["Do I get a meal?"], "RETRIEVAL_QUERY")
