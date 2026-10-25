@@ -93,7 +93,7 @@ all live; results checked afterwards in the database. 9 Oct 2026, ~01:00.
 
 ## 7. Performance (PF)
 
-Measured with `scripts/measure_latency.py` (report: `docs/testing/performance-baseline.md`)
+Measured with `scripts/measure_latency.py` (report: `docs/sprint-2/performance/0-baseline.md`)
 on the workstation over a phone hotspot, REST tier and agent service local, Supabase in
 eu-central-1 (Frankfurt). Booking A27Z99 (Edwards, DISRUPTED). REST calls x10 and assistant
 questions x3 (15 s apart), times in ms as p50 / p90. The REST tier's own Server-Timing is
@@ -130,7 +130,7 @@ those readings are discarded. No start-up measurement was taken before Phase 1.
 | PF-13 | Staff desk loaded only when staff sign in (deferred library) | Not downloaded by passengers | JavaScript build: passenger session (sign-in, all five sections) never requested `main.dart.js_1.part.js`; staff sign-in submitted: requested once, 15 KB. WebAssembly build: dart2wasm keeps the deferred library inside `main.dart.wasm` | Pass for the JavaScript build; not split in the WebAssembly build (which still starts faster) |
 
 Instant screens (Phase 2). REST times by `scripts/measure_latency.py --chat-runs 0` (report:
-`docs/testing/performance-phase2.md`), x10, p50 / p90 in ms; section switches in headless
+`docs/sprint-2/performance/2-warm-pool-trip-endpoint-gzip.md`), x10, p50 / p90 in ms; section switches in headless
 Chrome as above (click to the frame that shows the section).
 
 | ID | Test | Expected | Actual | Result / correction |
@@ -142,7 +142,7 @@ Chrome as above (click to the frame that shows the section).
 | PF-18 | Guest sign-in to My trip with data (headless) | Recorded | 661 ms (sign-in 430 ms, then `/api/trip` 399 ms; the layout and skeletons show after the first) | Recorded |
 
 Faster, smarter assistant (Phase 3). `scripts/measure_latency.py` with `--stream-runs`,
-`--quick-runs` (reports `docs/testing/performance-phase3.md`, `performance-phase3b.md`). The
+`--quick-runs` (reports `docs/sprint-2/performance/3a-streaming-and-quick-replies.md`, `3b-model-client-reuse-parallel-entitlements.md`). The
 baseline model `gemini-3.6-flash` had used its free daily quota (PF-07); `gemini-3.5-flash` is
 served from the same quota, so these runs used **`gemini-3.8-flash`** (also free tier, 20 a
 day), thinking level low, few runs each. Model-free paths (quick replies) were run x10.
@@ -157,8 +157,8 @@ day), thinking level low, few runs each. Model-free paths (quick replies) were r
 | PF-24 | Speculative policy search | Reused when the model asks the same question | Unit tests: one `/api/policy/search` call for the turn (with `handoff=false`); a different question gets its own; an out-of-scope result is not reused, so the case is still opened | Pass |
 | PF-25 | Two corrections found while measuring | - | (1) `get_llm()` built a new Gemini client every turn: now one per process, prepared when the agent service starts (the first turn after a restart had ~3 s of import and connection); (2) `GET /api/entitlements` read the booking and the vouchers one after the other: now at once - **410 ms** (was 787-1,024) | Corrected |
 
-Intelligent features (Phase 4; `docs/intelligence-features.md`). REST x10 and quick replies x10
-(`docs/testing/performance-phase4.md`; the hotspot was noisy, p90 up to 1-2 s; p50 shown).
+Intelligent features (Phase 4; `docs/design/assistant-intelligence-features.md`). REST x10 and quick replies x10
+(`docs/sprint-2/performance/4-recommendations-suggestions-memory.md`; the hotspot was noisy, p90 up to 1-2 s; p50 shown).
 
 | ID | Test | Expected | Actual | Result / correction |
 |---|---|---|---|---|
@@ -169,7 +169,7 @@ Intelligent features (Phase 4; `docs/intelligence-features.md`). REST x10 and qu
 
 ## 8. Review fixes, 18 Oct (security and correctness)
 
-From `docs/kestrel-issues-2026-10-18.md`. Unit tests need no database; IN = integration (live
+From `docs/sprint-2/ai-code-review/issues-found-and-fixed.md`. Unit tests need no database; IN = integration (live
 Supabase, rolled back).
 
 | ID | Issue | Test | Expected | Result |

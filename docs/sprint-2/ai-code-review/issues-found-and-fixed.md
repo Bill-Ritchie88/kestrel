@@ -1,6 +1,6 @@
 # Kestrel issues list (18 Oct 2026)
 
-These are the issues found when Ponytail (`/ponytail-audit`), Agent Skills (`/agent-skills:review`) and Claude Code's built-in `/review` were run on Kestrel. Issues found by more than one tool are merged into one entry. The full write-up is in [plugin-evaluation-2026-10-18.md](plugin-evaluation-2026-10-18.md).
+These are the issues found when Ponytail (`/ponytail-audit`), Agent Skills (`/agent-skills:review`) and Claude Code's built-in `/review` were run on Kestrel. Issues found by more than one tool are merged into one entry. The full write-up is in [review-tools-evaluation.md](review-tools-evaluation.md).
 
 **Legend:**
 - **Found by:** PT = Ponytail, AS = Agent Skills, BR = built-in `/review`

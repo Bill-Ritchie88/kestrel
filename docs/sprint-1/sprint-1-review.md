@@ -5,7 +5,7 @@ Prepared 24 September 2026. Covers the six items in the weekly progress brief.
 > **Paths below are as of 24 September.** On 1 October 2026 the project moved
 > out of the coursework repository into its own repository, and files were
 > renamed. The record below is left as written; translate paths with this table.
-> See [2026-10-01-standalone-repository.md](2026-10-01-standalone-repository.md).
+> See [01-standalone-repository-and-dataset-v2.md](../sprint-2/01-standalone-repository-and-dataset-v2.md).
 >
 > | 24 September | Now |
 > |---|---|

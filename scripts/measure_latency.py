@@ -6,7 +6,7 @@ and asks the assistant each question --chat-runs times, then prints p50 / p90
 / max per call and writes a Markdown report.
 
     python scripts/measure_latency.py
-    python scripts/measure_latency.py --label "Phase 2" --out docs/testing/performance-phase2.md
+    python scripts/measure_latency.py --label "Phase 2" --out docs/sprint-2/performance/2-warm-pool-trip-endpoint-gzip.md
 
 DEMO_PNR / DEMO_SURNAME choose the booking (default A27Z99 / Edwards). Both
 services must be running (.\\tasks.ps1 up). Nothing is rebooked; a question
@@ -269,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--quick-runs", type=int, default=0,
                         help="also send each quick reply (intent, no model) this many times")
     parser.add_argument("--label", default="baseline")
-    parser.add_argument("--out", default=str(ROOT / "docs" / "testing" / "performance-baseline.md"))
+    parser.add_argument("--out", default=str(ROOT / "docs" / "sprint-2" / "performance" / "0-baseline.md"))
     args = parser.parse_args(argv)
 
     pnr = os.getenv("DEMO_PNR", "A27Z99")

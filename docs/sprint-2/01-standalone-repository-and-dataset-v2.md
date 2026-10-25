@@ -1,6 +1,6 @@
 # Standalone repository, fixes and dataset v2
 
-Recorded 1 October 2026. Follows the [Sprint 1 review](sprint-1-review.md).
+Recorded 1 October 2026. Follows the [Sprint 1 review](../sprint-1/sprint-1-review.md).
 
 ---
 
@@ -112,5 +112,5 @@ Dataset v2 makes this visible by design. Scheduled for Sprint 2.
 
 A classical supervised ML component, flight-cancellation prediction trained on
 public US BTS data, is proposed in
-[../proposals/ml-disruption-prediction.md](../proposals/ml-disruption-prediction.md),
+[../proposals/ml-disruption-prediction.md](../future-work/ml-disruption-prediction.md),
 pending supervisor approval.

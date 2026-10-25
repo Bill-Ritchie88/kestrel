@@ -228,4 +228,4 @@ in `OneDrive/Documents/Project Kestrel/report/`.
 - Login throttling is per-process and in-memory; it will not hold across
   multiple workers or replicas.
 - `/api/trip` runs four queries at once on four of the ten pooled
-  connections (see `docs/connection-pool.md`).
+  connections (see `docs/design/database-connection-pool.md`).
