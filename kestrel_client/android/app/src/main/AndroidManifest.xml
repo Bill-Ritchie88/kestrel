@@ -2,9 +2,6 @@
     <!-- Kestrel: talk to the REST tier and agent service, and the microphone for voice questions. -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-    <!-- Kestrel: the REST tier and agent service, and voice dictation. -->
-    <uses-permission android:name="android.permission.INTERNET"/>
-    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <application
         android:label="Kestrel App"
         android:usesCleartextTraffic="true"
@@ -38,13 +35,6 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="io.kestrel.app" android:host="login-callback"/>
             </intent-filter>
-            <!-- Google sign-in returns to the app here (AppConfig.appAuthRedirect). -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW"/>
-                <category android:name="android.intent.category.DEFAULT"/>
-                <category android:name="android.intent.category.BROWSABLE"/>
-                <data android:scheme="io.kestrel.app" android:host="login-callback"/>
-            </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
@@ -58,9 +48,6 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
-        <intent>
-            <action android:name="android.speech.RecognitionService"/>
-        </intent>
         <intent>
             <action android:name="android.speech.RecognitionService"/>
         </intent>
