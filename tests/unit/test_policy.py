@@ -230,6 +230,58 @@ def test_evaluation_reference_matching_respects_article_numbers():
     assert not mod.ref_matches("EU261 Art. 10", "EU261 Art. 1")
 
 
+def _evaluation_module():
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "scripts" / "evaluation" / "evaluate_retrieval.py"
+    spec = importlib.util.spec_from_file_location("evaluate_retrieval", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _scored(n_in: int, n_out: int) -> list[dict]:
+    """Synthetic scored questions: in-scope ones score high, out-of-scope ones low."""
+    rows = [
+        {"question_id": f"Q{i:03d}", "in_scope": True, "top": 0.70 + 0.002 * i} for i in range(n_in)
+    ]
+    rows += [
+        {"question_id": f"Q{100 + i:03d}", "in_scope": False, "top": 0.55 + 0.002 * i}
+        for i in range(n_out)
+    ]
+    return rows
+
+
+def test_cross_validation_folds_are_stratified_and_cover_every_question():
+    mod = _evaluation_module()
+    rows = _scored(30, 14)
+    folds = mod.stratified_folds(rows, 5)
+    assert sorted(r["question_id"] for f in folds for r in f) == sorted(
+        r["question_id"] for r in rows
+    )
+    for f in folds:
+        assert sum(r["in_scope"] for r in f) in (6,)  # 30 in-scope over 5 folds
+        assert sum(not r["in_scope"] for r in f) in (2, 3)  # 14 out-of-scope over 5 folds
+    assert mod.stratified_folds(rows, 5) == folds  # repeatable
+
+
+def test_cross_validation_chooses_tau_on_the_other_folds():
+    mod = _evaluation_module()
+    rows = _scored(30, 14)
+    results = mod.cross_validate_tau(rows, 5)
+    assert [m["fold"] for m in results] == [1, 2, 3, 4, 5]
+    assert sum(m["n"] for m in results) == len(rows)
+    # Classes separate cleanly between 0.58 and 0.70, so every fold picks a tau there and scores F0.5 = 1.
+    assert all(0.58 < m["tau"] <= 0.70 and m["f0_5"] == 1.0 for m in results)
+
+
+def test_choose_tau_breaks_ties_towards_the_stricter_value():
+    mod = _evaluation_module()
+    best = mod.choose_tau(_scored(5, 5), [0.60, 0.62, 0.64])
+    assert best["tau"] == 0.64  # all three separate the classes; the strictest wins
+
+
 def test_labelled_question_set_is_well_formed():
     import csv
     from pathlib import Path

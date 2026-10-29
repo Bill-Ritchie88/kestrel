@@ -24,7 +24,12 @@ Every question is embedded once and its top-3 clauses retrieved. Then:
 
 The tau with the highest F0.5 on the calibration split is chosen; precision,
 recall, F0.5 and the false hand-off rate are reported on the test split at
-that tau. Results are written to docs/sprint-2/03-retrieval-evaluation.md and a
+that tau. To show how stable that choice is, five-fold cross-validation is run
+within the calibration split: the questions are divided into five folds
+(stratified by in_scope, assigned in question_id order, so the run is
+repeatable), tau is chosen on four folds and F0.5 is measured on the fifth, and
+the spread of the five chosen taus is reported. Results are written to
+docs/sprint-2/03-retrieval-evaluation.md and a
 CSV of every question's scores, so the report quotes measured numbers only.
 
     python scripts/evaluation/evaluate_retrieval.py
@@ -99,6 +104,48 @@ def recall_at_k(rows: list[dict]) -> float:
     return sum(1 for r in scored if hit_at_k(r)) / len(scored)
 
 
+CANDIDATE_TAUS = [round(0.50 + 0.01 * i, 2) for i in range(46)]  # 0.50 .. 0.95
+FOLDS = 5
+
+
+def choose_tau(rows: list[dict], candidates: list[float] = CANDIDATE_TAUS) -> dict:
+    """The candidate with the highest F0.5 on `rows`; ties go to the stricter tau."""
+    return max((scope_metrics(rows, t) for t in candidates), key=lambda m: (m["f0_5"], m["tau"]))
+
+
+def stratified_folds(rows: list[dict], k: int = FOLDS) -> list[list[dict]]:
+    """Split rows into k folds with in-scope and out-of-scope questions spread evenly.
+
+    Deterministic: each class is taken in question_id order and dealt round-robin.
+    """
+    folds: list[list[dict]] = [[] for _ in range(k)]
+    for in_scope in (True, False):
+        group = sorted(
+            (r for r in rows if r["in_scope"] == in_scope), key=lambda r: r["question_id"]
+        )
+        for i, r in enumerate(group):
+            folds[i % k].append(r)
+    return folds
+
+
+def cross_validate_tau(rows: list[dict], k: int = FOLDS) -> list[dict]:
+    """For each fold: tau chosen on the other folds, scored on the held-out fold."""
+    folds = stratified_folds(rows, k)
+    results = []
+    for i, held_out in enumerate(folds):
+        train = [r for j, f in enumerate(folds) if j != i for r in f]
+        tau = choose_tau(train)["tau"]
+        results.append({"fold": i + 1, "n": len(held_out), **scope_metrics(held_out, tau)})
+    return results
+
+
+def mean_sd(values: list[float]) -> tuple[float, float]:
+    n = len(values)
+    mean = sum(values) / n
+    sd = (sum((v - mean) ** 2 for v in values) / (n - 1)) ** 0.5 if n > 1 else 0.0
+    return mean, sd
+
+
 async def main() -> int:
     import asyncpg
 
@@ -122,15 +169,19 @@ async def main() -> int:
 
     cal = [r for r in rows if r["split"] == "calibration"]
     test = [r for r in rows if r["split"] == "test"]
-    candidates = [round(0.50 + 0.01 * i, 2) for i in range(46)]  # 0.50 .. 0.95
-    sweep = [scope_metrics(cal, t) for t in candidates]
-    best = max(sweep, key=lambda m: (m["f0_5"], m["tau"]))  # ties -> stricter tau
+    sweep = [scope_metrics(cal, t) for t in CANDIDATE_TAUS]
+    best = choose_tau(cal)  # ties -> stricter tau
+    cv = cross_validate_tau(cal)
+    cv_tau_mean, cv_tau_sd = mean_sd([m["tau"] for m in cv])
+    cv_f_mean, cv_f_sd = mean_sd([m["f0_5"] for m in cv])
     at_start = scope_metrics(test, 0.75)
     at_best = scope_metrics(test, best["tau"])
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-    with (OUT_DIR / "03-retrieval-evaluation-scores.csv").open("w", encoding="utf-8", newline="") as f:
+    with (OUT_DIR / "03-retrieval-evaluation-scores.csv").open(
+        "w", encoding="utf-8", newline=""
+    ) as f:
         w = csv.writer(f)
         w.writerow(["question_id", "split", "in_scope", "topic", "top_similarity", "hit_at_3",
                     "top3_refs", "top3_sims", "question"])  # fmt: skip
@@ -161,6 +212,18 @@ async def main() -> int:
         line(at_start) + " starting value |",
         line(at_best) + " calibrated |",
         "",
+        f"Five-fold cross-validation within the calibration split (stratified by in_scope): tau chosen on "
+        f"four folds, F0.5 measured on the fifth. Tau {cv_tau_mean:.3f} ± {cv_tau_sd:.3f} (mean ± sd), "
+        f"held-out F0.5 {cv_f_mean:.3f} ± {cv_f_sd:.3f}.",
+        "",
+        "| fold | questions | tau chosen on the other folds | precision | recall | F0.5 | TP/FP/FN/TN |",
+        "|---|---|---|---|---|---|---|",
+        *[
+            f"| {m['fold']} | {m['n']} | {m['tau']:.2f} | {m['precision']:.3f} | {m['recall']:.3f} | "
+            f"{m['f0_5']:.3f} | {m['tp']}/{m['fp']}/{m['fn']}/{m['tn']} |"
+            for m in cv
+        ],
+        "",
         "Calibration sweep:",
         "",
         "| tau | precision | recall | F0.5 | false hand-off rate | TP/FP/FN/TN |",
@@ -169,6 +232,9 @@ async def main() -> int:
     ]
     (OUT_DIR / "03-retrieval-evaluation.md").write_text("\n".join(report) + "\n", encoding="utf-8")
     print("\n".join(report[:12]))
+    print(
+        f"[INFO] 5-fold CV: tau {cv_tau_mean:.3f} ± {cv_tau_sd:.3f}, held-out F0.5 {cv_f_mean:.3f} ± {cv_f_sd:.3f}"
+    )
     print(f"\n[OK]   Set POLICY_TAU={best['tau']:.2f} in .env and restart the API.")
     return 0
 
