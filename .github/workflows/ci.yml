@@ -26,7 +26,7 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-      - run: pip install ruff
+      - run: pip install -c requirements.lock.txt ruff
       - run: ruff check . --output-format=github
 
   test:
@@ -38,7 +38,8 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-      - run: pip install -r requirements-dev.txt -e .
+      # Pinned to requirements.lock.txt: the versions the suite was last verified with.
+      - run: pip install -c requirements.lock.txt -r requirements-dev.txt -e .
       # No DATABASE_URL is configured, so tests marked `integration` skip
       # themselves. The unit suite must pass without any credentials.
       - run: pytest -v
