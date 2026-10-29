@@ -1,8 +1,8 @@
-# Kestrel Web and Kestrel App (Flutter)
+# Kestrel Web (Flutter)
 
-One Flutter codebase, two products. **Kestrel Web** is the website: it runs in
-a desktop or laptop browser (a dashboard with a sidebar) and in a phone browser
-(one column with a tab bar). **Kestrel App** is the same code built for Android.
+**Kestrel Web** is one responsive website: it runs in a desktop or laptop
+browser (a dashboard with a sidebar) and in a phone browser (one column with
+a tab bar).
 
 The passenger interface for Project Kestrel (FR-08) and the staff disruption
 desk (FR-09). The layout is a flight-dashboard layout (sidebar, top bar,
@@ -101,9 +101,6 @@ flutter run -d chrome --web-port 5173 `
   --dart-define=AGENT_BASE=http://127.0.0.1:8001
 ```
 
-The Android emulator reaches your PC at `10.0.2.2`; `config.dart` uses that
-automatically on Android.
-
 ### Sign in with Google or an email code (Supabase Auth)
 
 Without these two settings the sign-in page offers only the booking
@@ -156,27 +153,8 @@ out signs out of both.
 - [ ] **Redirect URLs**: Authentication → URL Configuration. Set **Site URL**
       to where the site runs (`http://localhost:5173` locally) and add every
       address the app runs at to **Redirect URLs**: `http://localhost:5173`,
-      the deployed site's origin, and `io.kestrel.app://login-callback` for
-      the Android app. Google returns the browser to the page's own origin.
-- [ ] **Android only**: Google comes back to the app through the deep link
-      `io.kestrel.app://login-callback`, already declared on the main
-      `<activity>` in `android/app/src/main/AndroidManifest.xml`. The email
-      code needs no deep link.
-
-### Kestrel App (Android)
-
-1. `flutter doctor --android-licenses` and accept.
-2. Create an emulator in Android Studio (Device Manager) and start it.
-3. With the services running (`.	asks.ps1 start`), from `kestrel_client`:
-
-   ```powershell
-   flutter run -d emulator --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...
-   ```
-
-The Android project in `android/` is versioned: the manifest already has the
-internet and microphone permissions, the voice-recognition query,
-`usesCleartextTraffic` (the local services use plain HTTP) and the Google
-sign-in deep link. Application ID and namespace: `io.kestrel.app`.
+      and the deployed site's origin. Google returns the browser to the
+      page's own origin.
 
 ### Demos: the release build on http://localhost:8080
 
@@ -252,8 +230,12 @@ so lines stay readable. In the chat, **Enter** sends and **Shift+Enter** adds
 a new line. The staff desk shows the case detail beside the table from 1100 px
 of content width; on a phone a case opens as its own page.
 
-`web/` (page title, description, icons, dark loading screen) is part of the
-source, and so is `android/` (Kestrel App).
+On phones there is nothing to install: below 1080 px the site switches to
+the phone layout, and the browser menu's **Add to Home screen** puts it on
+the home screen like an app (web manifest), no app store needed.
+
+`web/` (page title, description, icons, dark loading screen, web manifest) is
+part of the source.
 
 ## Accessibility (UI UX Pro Max checklist)
 

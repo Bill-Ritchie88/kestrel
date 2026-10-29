@@ -36,6 +36,5 @@ the supervisor, an account, money or real participants, so code alone cannot clo
 - Agree the remaining tasks, acceptance criteria and the same-route scope with the supervisor.
 - Set `POLICY_TAU=0.66` in `.env` and in the deployed configuration, then restart the API.
 - GCP: project, region `europe-west3`, MFA, budget alert, Secret Manager, then deploy (`deploy/README.md`).
-- Android: install the NDK (Android Studio, SDK Manager, NDK side by side). The local APK build fails without it. Play Console account, signing key kept outside Git, 12 testers for 14 days.
 - Usability sessions with representative users; record task success, problems and fixes.
 - Report: Chapters 5 and 6, the Chapter 3/4 corrections, references in APA 7.

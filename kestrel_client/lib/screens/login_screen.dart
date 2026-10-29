@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 
 import '../api/kestrel_api.dart';
 import '../auth/account_auth.dart';
-import '../config.dart';
 import '../format.dart';
 import '../state/public.dart';
 import '../state/session.dart';
@@ -355,7 +354,8 @@ class _AccountOptionsState extends State<_AccountOptions> {
     });
     AccountIdentity? identity;
     try {
-      identity = await _auth.signInWithGoogle(redirectTo: kIsWeb ? Uri.base.origin : AppConfig.appAuthRedirect);
+      // Outside a browser (the test runner) Uri.base is a file: URI with no origin.
+      identity = await _auth.signInWithGoogle(redirectTo: kIsWeb ? Uri.base.origin : null);
       if (identity != null) await _finish(identity);
     } on AccountAuthException catch (e) {
       if (mounted) setState(() => _notice = e.message);

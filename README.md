@@ -167,21 +167,15 @@ Configuration → Redirect URLs (for Google sign-in).
 `.\tasks.ps1 down` stops both services. `/health` on :8000 should report
 `database: connected`. Other targets: `.\tasks.ps1 help`.
 
-### Kestrel Web and Kestrel App
+### Kestrel Web
 
-One Flutter codebase in `kestrel_client/` gives two products:
+Kestrel Web, in `kestrel_client/`, is the only client: one responsive Flutter
+web app for desktop and phone browsers. `.\tasks.ps1 web` builds it and serves
+it on http://localhost:8080.
 
-- **Kestrel Web**, the website: `.\tasks.ps1 web` builds it and serves it on
-  http://localhost:8080.
-- **Kestrel App**, the Android app: with the services running and an Android
-  emulator open, from `kestrel_client`:
-
-  ```powershell
-  flutter run -d emulator --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...
-  ```
-
-  The two values are the same `SUPABASE_URL` and `SUPABASE_ANON_KEY` as in
-  `.env`; without them only booking-reference sign-in works.
+On phones there is nothing to install: below 1080 px the site switches to
+the phone layout, and the browser menu's **Add to Home screen** puts it on
+the home screen like an app (web manifest), no app store needed.
 
 ---
 
@@ -220,7 +214,7 @@ mistake fail the build.
 
 ```
 kestrel/
-├── kestrel_client/               Kestrel Web and Kestrel App, one Flutter codebase (see kestrel_client/README.md)
+├── kestrel_client/               Kestrel Web, the Flutter web client (see kestrel_client/README.md)
 ├── src/kestrel/                  Python package (pip install -e .)
 │   ├── api/                      REST tier (uvicorn kestrel.api.main:app)
 │   ├── agent.py, agent_service.py  Agent tier (uvicorn kestrel.agent_service:app)

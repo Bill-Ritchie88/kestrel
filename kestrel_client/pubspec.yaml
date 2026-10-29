@@ -1,5 +1,5 @@
 name: kestrel_client
-description: "Project Kestrel — Kestrel Web (website) and Kestrel App (Android), one Flutter codebase."
+description: "Project Kestrel — Kestrel Web, a responsive Flutter web app for desktop and mobile browsers."
 publish_to: "none"
 version: 0.2.0+1
 

@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import 'auth/supabase_account_auth.dart';
@@ -43,7 +42,7 @@ class KestrelApp extends StatelessWidget {
         child: PublicScope(
           public: public,
           child: MaterialApp(
-            title: kIsWeb ? 'Kestrel Web — disruption assistant' : 'Kestrel App',
+            title: 'Kestrel Web — disruption assistant',
             debugShowCheckedModeBanner: false,
             theme: kestrelTheme(),
             darkTheme: kestrelTheme(),

@@ -682,8 +682,7 @@ void main() {
 
   testWidgets('brand line, app title and disclaimer', (tester) async {
     await _pump(tester, _Backend().client, screen: laptop);
-    expect(tester.widget<MaterialApp>(find.byType(MaterialApp)).title,
-        kIsWeb ? 'Kestrel Web — disruption assistant' : 'Kestrel App');
+    expect(tester.widget<MaterialApp>(find.byType(MaterialApp)).title, 'Kestrel Web — disruption assistant');
     expect(find.text('KENYA AIRWAYS'), findsNothing);
     expect(find.textContaining(disclaimer), findsOneWidget); // Home footer
 

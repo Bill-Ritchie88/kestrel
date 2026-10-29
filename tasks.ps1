@@ -109,37 +109,6 @@ function Invoke-Web {
     & $Py scripts/dev/serve_web.py --port 8080
 }
 
-function Invoke-Android {
-    # Runs the app on the Android emulator (start one first in Android Studio:
-    # Device Manager -> play). The emulator reaches this PC's services at
-    # 10.0.2.2:8000 and :8001 (AppConfig), so start them first: .\tasks.ps1 start
-    # Supabase settings come from .env, as for the website, without being printed.
-    $defines = @()
-    if (Test-Path .env) {
-        $vals = @{}
-        foreach ($line in Get-Content .env) {
-            if ($line -match '^\s*(SUPABASE_URL|SUPABASE_ANON_KEY)\s*=\s*"?([^"#]*)"?\s*$') {
-                $vals[$Matches[1]] = $Matches[2].Trim()
-            }
-        }
-        if ($vals["SUPABASE_URL"] -and $vals["SUPABASE_ANON_KEY"]) {
-            $defines += "--dart-define=SUPABASE_URL=$($vals['SUPABASE_URL'])"
-            $defines += "--dart-define=SUPABASE_ANON_KEY=$($vals['SUPABASE_ANON_KEY'])"
-            Write-Host "Google and email sign-in: on (Supabase settings from .env)"
-        }
-    }
-    # Windows PowerShell 5.1: join the JSON lines first, and enumerate the array from a variable.
-    $devices = flutter devices --machine | Out-String | ConvertFrom-Json
-    $device = ($devices | Where-Object { $_.targetPlatform -like "android*" } | Select-Object -First 1).id
-    if (-not $device) { throw "No Android emulator running. Start one in Android Studio (Device Manager), then try again." }
-    Push-Location kestrel_client
-    try {
-        flutter run -d $device @defines
-    } finally {
-        Pop-Location
-    }
-}
-
 switch ($Target) {
     "setup"    { Invoke-Setup }
     "lock"     { & $Py -m pip freeze | Out-File -Encoding utf8 requirements.lock.txt
@@ -154,7 +123,6 @@ switch ($Target) {
     "api"      { & $Py -m uvicorn kestrel.api.main:app --reload }
     "agent-api" { & $Py -m uvicorn kestrel.agent_service:app --port 8001 --reload }
     "web"      { Invoke-Web }
-    "android"  { Invoke-Android }
     "down"     { Stop-KestrelServices }
     { $_ -in "up", "start" } { Stop-KestrelServices
                  # Both services need the same AGENT_HISTORY_KEY (assistant turns are
@@ -189,7 +157,6 @@ switch ($Target) {
             @("api",      "Run the REST tier with reload"),
             @("agent-api","Run the agent service (Flutter chat) on :8001"),
             @("web",      "Release build of the website, served on http://localhost:8080"),
-            @("android",  "Run the app on the running Android emulator (start the services first)"),
             @("start",    "Start (or restart) the REST tier and the agent service together"),
             @("up",       "Same as start"),
             @("down",     "Stop both services, including orphaned reload workers"),

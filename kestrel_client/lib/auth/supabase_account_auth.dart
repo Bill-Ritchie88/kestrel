@@ -80,19 +80,10 @@ class SupabaseAccountAuth implements AccountAuth {
     } catch (e) {
       throw _map(e);
     }
-    // In a browser the page is now leaving for Google; the identity arrives
-    // through takePendingIdentity() when it comes back.
+    // The page is now leaving for Google; the identity arrives through
+    // takePendingIdentity() when it comes back.
     if (kIsWeb) return null;
-    // In the Android app, Google opens in the browser and the session comes
-    // back through the AppConfig.appAuthRedirect deep link.
-    try {
-      final state = await _auth.onAuthStateChange
-          .firstWhere((s) => s.session != null)
-          .timeout(const Duration(minutes: 3));
-      return _identity(state.session);
-    } catch (_) {
-      throw const AccountAuthException(AccountAuthError.other, 'Signing in with Google didn\'t finish. Please try again.');
-    }
+    throw const AccountAuthException(AccountAuthError.other, 'Signing in with Google didn\'t finish. Please try again.');
   }
 
   @override

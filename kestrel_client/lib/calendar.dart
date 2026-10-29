@@ -41,7 +41,7 @@ String? calendarFile(Booking booking, {DateTime? now}) {
 }
 
 /// Offers the file to the browser as a download. False where that is not
-/// possible (the Android app), so the caller can say so.
+/// possible (outside a browser, e.g. the test runner), so the caller can say so.
 bool downloadCalendar(Booking booking) {
   final ics = calendarFile(booking);
   if (ics == null) return false;
