@@ -102,7 +102,7 @@ delete the copy afterwards.)
 gcloud run deploy kestrel-api --image=$img --region=europe-west3 `
   --allow-unauthenticated --port=8080 `
   --min-instances=1 --max-instances=2 --no-cpu-throttling --cpu=1 --memory=512Mi `
-  --set-env-vars="SERVICE=api,EMBEDDING_MODEL=gemini-embedding-001,POLICY_TAU=0.75,SUPABASE_URL=https://REF.supabase.co,SUPABASE_ANON_KEY=ANON_KEY,ALLOWED_ORIGINS=https://YOUR-SITE" `
+  --set-env-vars="SERVICE=api,EMBEDDING_MODEL=gemini-embedding-001,POLICY_TAU=0.66,SUPABASE_URL=https://REF.supabase.co,SUPABASE_ANON_KEY=ANON_KEY,ALLOWED_ORIGINS=https://YOUR-SITE" `
   --set-secrets="DATABASE_URL=kestrel-database-url:latest,GOOGLE_API_KEY=kestrel-google-api-key:latest,SESSION_SECRET=kestrel-session-secret:latest,STAFF_API_KEY=kestrel-staff-key:latest,AGENT_HISTORY_KEY=kestrel-agent-history-key:latest" `
   --startup-probe="httpGet.path=/health,periodSeconds=5,failureThreshold=12"
 ```
@@ -152,7 +152,7 @@ PowerShell window, not into a file):
 
 ```powershell
 fly secrets set --app kestrel-api DATABASE_URL=... GOOGLE_API_KEY=... SESSION_SECRET=... STAFF_API_KEY=... AGENT_HISTORY_KEY=... `
-  SUPABASE_URL=https://REF.supabase.co SUPABASE_ANON_KEY=... EMBEDDING_MODEL=gemini-embedding-001 POLICY_TAU=0.75 `
+  SUPABASE_URL=https://REF.supabase.co SUPABASE_ANON_KEY=... EMBEDDING_MODEL=gemini-embedding-001 POLICY_TAU=0.66 `
   ALLOWED_ORIGINS=https://YOUR-SITE
 fly deploy . --config deploy/fly.api.toml
 ```

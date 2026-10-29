@@ -6,9 +6,10 @@ cosine similarity. If the best match falls below the threshold tau, the
 question is out of scope: the agent must not answer it from its own
 knowledge, and the REST tier opens a hand-off case instead.
 
-tau starts at 0.75 (Section 4.2.1) and is calibrated by
+tau started at 0.75 (Section 4.2.1) and was calibrated to 0.66 on 25 Oct 2026 by
 scripts/evaluation/evaluate_retrieval.py, which picks the value maximising F0.5 on the
-labelled question set. Set POLICY_TAU in .env to the calibrated value.
+calibration split of the labelled question set (docs/sprint-2/03-retrieval-evaluation.md).
+POLICY_TAU in .env overrides the default.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from dataclasses import asdict, dataclass
 
 from kestrel.policy.embeddings import TASK_QUERY, Embedder, to_pgvector
 
-DEFAULT_TAU = float(os.getenv("POLICY_TAU", "0.75"))
+DEFAULT_TAU = float(os.getenv("POLICY_TAU", "0.66"))
 DEFAULT_K = 3
 CACHE_SIZE = 256
 
@@ -45,6 +46,7 @@ def normalise_question(question: str) -> str:
     """The cache key: case, spacing and closing punctuation do not change
     what is asked."""
     return " ".join(question.lower().split()).rstrip("?.! ")
+
 
 SQL_MATCH = "SELECT * FROM match_policy_chunks($1, $2);"
 
