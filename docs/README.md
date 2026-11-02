@@ -23,8 +23,10 @@ integrity · NFR-04 retrieval accuracy.
 | [sprint-2/03-retrieval-evaluation.md](sprint-2/03-retrieval-evaluation.md) | Retrieval evaluation and tau calibration on the labelled question set, with [per-question scores](sprint-2/03-retrieval-evaluation-scores.csv) | 2 | NFR-04, FR-05 |
 | [sprint-2/04-load-test.md](sprint-2/04-load-test.md) | Load test: concurrent rebooking integrity at N = 50, 100, 200 and API latency at 50 concurrent requests, self-cleaning fixture, with [one row per run](sprint-2/04-load-test-runs.csv) | 2 | NFR-01, NFR-03 |
 | [sprint-2/05-ai-use-log.md](sprint-2/05-ai-use-log.md) | AI-use log: tools used, one AI suggestion examined in full (account linking) and the other suggestions checked | 2 | FR-01, FR-05, NFR-03, NFR-04 |
+| [sprint-2/sprint-2-review.md](sprint-2/sprint-2-review.md) | Sprint 2 review: backlog planned vs delivered, the four review items, results (retrieval, load test, response time), changes of scope, open items | 2 | All |
 | [traceability.md](traceability.md) | Every requirement mapped to code, test, result and evidence | 3 | All |
 | [sprint-3/00-status.md](sprint-3/00-status.md) | Sprint III status: remaining build work checked against the code, gaps and owner actions | 3 | All |
+| [sprint-3/01-usability-test-plan.md](sprint-3/01-usability-test-plan.md) | Usability test plan for Kestrel Web: participants, consent, five tasks, SUS questionnaire, notes sheet, analysis | 3 | FR-08 |
 | [design/assistant-intelligence-features.md](design/assistant-intelligence-features.md) | Design of the assistant's recommendations, explanations, suggestions and frustration hand-off | 2 | FR-03, FR-05, FR-08 |
 | [design/database-connection-pool.md](design/database-connection-pool.md) | How the REST tier's database connection pool is sized and kept warm | 2 | NFR-01, NFR-02 |
 | [future-work/ml-disruption-prediction.md](future-work/ml-disruption-prediction.md) | Proposal: a supervised model that predicts flight disruption (pending approval) | Future | — |
