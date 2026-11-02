@@ -54,8 +54,8 @@ ingest:  ## Chunk, embed and load the policy corpus (data/policy/sources)
 evaluate:  ## Retrieval evaluation and tau calibration (data/eval/policy_questions.csv)
 	$(PY) scripts/evaluation/evaluate_retrieval.py
 
-loadtest:  ## Concurrent rebooking test, rolled back (NFR-01, NFR-02)
-	$(PY) scripts/evaluation/load_test.py --passengers 12
+loadtest:  ## Concurrent rebooking load test, own fixture created and removed (NFR-01, NFR-03)
+	$(PY) scripts/evaluation/load_test.py --mode all
 
 agent:  ## Run the agent for a disrupted passenger (needs `make api` running)
 	$(PY) scripts/dev/agent_demo.py

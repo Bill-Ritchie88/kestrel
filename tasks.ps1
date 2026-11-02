@@ -137,7 +137,7 @@ switch ($Target) {
                  Write-Host "REST tier on :8000, agent service on :8001 (two new windows)" }
     "ingest"   { & $Py scripts/data/ingest_policies.py }
     "evaluate" { & $Py scripts/evaluation/evaluate_retrieval.py }
-    "loadtest" { & $Py scripts/evaluation/load_test.py --passengers 12 }
+    "loadtest" { & $Py scripts/evaluation/load_test.py --mode all }
     "agent"    { & $Py scripts/dev/agent_demo.py }
     "hooks"    { & $Py -m pre_commit install; & $Py -m pre_commit run --all-files }
     "clean"    { Get-ChildItem -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
@@ -162,7 +162,7 @@ switch ($Target) {
             @("down",     "Stop both services, including orphaned reload workers"),
             @("ingest",   "Chunk, embed and load the policy corpus"),
             @("evaluate", "Retrieval evaluation and tau calibration"),
-            @("loadtest", "Concurrent rebooking test (rolled back)"),
+            @("loadtest", "Concurrent rebooking load test; creates and removes its own fixture"),
             @("agent",    "Run the agent for a disrupted passenger"),
             @("hooks",    "Install pre-commit hooks"),
             @("clean",    "Remove caches")
