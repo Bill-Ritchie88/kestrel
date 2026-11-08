@@ -1,7 +1,7 @@
 
 
 .DEFAULT_GOAL := help
-.PHONY: help setup lock lint fmt test test-all smoke data reset api agent-api agent ingest evaluate loadtest hooks clean
+.PHONY: help setup lock lint fmt test test-all smoke data reset usability usability-cleanup api agent-api agent ingest evaluate loadtest hooks clean
 
 PY ?= python
 
@@ -41,6 +41,12 @@ data:  ## Regenerate the synthetic dataset (7 days, seeded)
 
 reset:  ## Reset the demo data: schedule re-anchored to now, disruption recreated
 	$(PY) scripts/data/reset_demo.py
+
+usability:  ## Create or refresh the six usability-test bookings (prints references)
+	$(PY) scripts/data/create_usability_bookings.py
+
+usability-cleanup:  ## Remove the usability-test flight, passengers and bookings
+	$(PY) scripts/data/create_usability_bookings.py --cleanup
 
 api:  ## Run the REST tier with reload
 	uvicorn kestrel.api.main:app --reload
