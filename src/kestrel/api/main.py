@@ -19,7 +19,9 @@ Endpoint map (Sprint 2):
     POST /api/chat/history               append one turn (assistant turns: agent service only)
     DELETE /api/chat/history             "Start over"
     GET  /api/flights/alternatives       FR-03  same route, same cabin, seats left
-    POST /api/reaccommodate              FR-03, FR-07  atomic rebooking + entitlements
+    GET  /api/flights/{flight_id}/seats  FR-16  seat map of the passenger's cabin on an alternative
+    POST /api/reaccommodate              FR-03, FR-07, FR-16  atomic rebooking (optional seat_id)
+                                         + entitlements; a chosen seat taken first is 409 SEAT_TAKEN
     GET  /api/policy/search              FR-02, FR-05  grounded clauses or a hand-off
     GET  /api/entitlements               FR-04  what the rules say, with reasons
     GET  /api/vouchers                   FR-04  issued vouchers
@@ -32,6 +34,7 @@ Endpoint map (Sprint 2):
 import asyncio
 import hmac
 import os
+import uuid
 from contextlib import asynccontextmanager
 from typing import Literal
 
@@ -97,7 +100,7 @@ SQL_AUTHENTICATE = """
 # cabins), scheduled and in the future, with at least one free seat in that
 # cabin. Ordered by arrival, because getting there is what the passenger
 # cares about (wireframe M09).
-SQL_FIND_ALTERNATIVES = """
+_BOOKING_CABIN = """
     WITH bk AS (
         SELECT b.pnr_code,
                COALESCE(b.reaccommodated_flight_id, b.original_flight_id) AS current_flight,
@@ -106,6 +109,20 @@ SQL_FIND_ALTERNATIVES = """
         LEFT JOIN seats cs ON cs.seat_id = b.assigned_seat_id
         WHERE b.pnr_code = $1
     )
+"""
+# alt: a flight the booking may move to (the procedure's route and schedule rules).
+_ALTERNATIVE_FLIGHT = """
+    JOIN flights orig ON orig.flight_id = bk.current_flight
+    JOIN flights alt  ON alt.origin = orig.origin
+                     AND alt.destination = orig.destination
+                     AND alt.flight_id <> orig.flight_id
+                     AND alt.status = 'SCHEDULED'
+                     AND alt.departure_time > now()
+"""
+# The two queries below are built from the constant fragments above only;
+# every value is a bind parameter, so S608 (string-built SQL) does not apply.
+
+SQL_FIND_ALTERNATIVES = _BOOKING_CABIN + """
     SELECT alt.flight_id::text AS flight_id,
            alt.flight_number,
            alt.origin,
@@ -115,27 +132,64 @@ SQL_FIND_ALTERNATIVES = """
            alt.aircraft_type,
            bk.cabin            AS cabin_class,
            count(s.seat_id)    AS available_seats
-    FROM bk
-    JOIN flights orig ON orig.flight_id = bk.current_flight
-    JOIN flights alt  ON alt.origin = orig.origin
-                     AND alt.destination = orig.destination
+    FROM bk""" + _ALTERNATIVE_FLIGHT + """
     JOIN seats   s    ON s.flight_id = alt.flight_id
                      AND s.status = 'AVAILABLE'
                      AND s.cabin_class::text = bk.cabin
-    WHERE alt.flight_id <> orig.flight_id
-      AND alt.status = 'SCHEDULED'
-      AND alt.departure_time > now()
     GROUP BY alt.flight_id, alt.flight_number, alt.origin, alt.destination,
              alt.departure_time, alt.arrival_time, alt.aircraft_type, bk.cabin
     ORDER BY alt.arrival_time ASC NULLS LAST, alt.departure_time ASC
     LIMIT $2;
-"""
+"""  # noqa: S608
 
-SQL_REACCOMMODATE = "SELECT * FROM reaccommodate_passenger_atomic($1, $2, $3);"
+# FR-16. Every seat of the passenger's cabin on flight $2, only when $2 is one
+# of the booking's alternatives (no rows otherwise). Row by number, so 10A
+# follows 9A.
+SQL_SEAT_MAP = _BOOKING_CABIN + r"""
+    SELECT s.seat_id::text AS seat_id,
+           s.seat_number,
+           NULLIF(regexp_replace(s.seat_number, '\D', '', 'g'), '')::int AS seat_row,
+           regexp_replace(s.seat_number, '\d', '', 'g')                 AS seat_letter,
+           s.status = 'AVAILABLE'                                       AS free,
+           alt.aircraft_type,
+           bk.cabin                                                     AS cabin_class
+    FROM bk""" + _ALTERNATIVE_FLIGHT + """
+                     AND alt.flight_id = $2
+    JOIN seats s ON s.flight_id = alt.flight_id AND s.cabin_class::text = bk.cabin
+    ORDER BY seat_row NULLS LAST, seat_letter;
+"""  # noqa: S608
+
+# Aisles, as scripts/data/generate_dataset.py lays the cabins out.
+SEAT_LAYOUTS = {
+    ("E190", "BUSINESS"): "AC DF",
+    ("E190", "ECONOMY"): "AC DF",
+    ("738", "BUSINESS"): "AC DF",
+    ("738", "ECONOMY"): "ABC DEF",
+    ("788", "BUSINESS"): "AC DG HK",
+    ("788", "ECONOMY"): "ABC DEFG HJK",
+}
+
+
+def seat_layout(aircraft: str | None, cabin: str, letters: list[str]) -> str:
+    """The cabin's seat letters left to right, a space for each aisle. An
+    unknown aircraft gets one aisle down the middle."""
+    known = SEAT_LAYOUTS.get((aircraft, cabin))
+    if known and set(known.replace(" ", "")) == set(letters):
+        return known
+    half = (len(letters) + 1) // 2
+    return " ".join(p for p in ("".join(letters[:half]), "".join(letters[half:])) if p)
+
+
+SQL_REACCOMMODATE = "SELECT * FROM reaccommodate_passenger_atomic($1, $2, $3, $4);"
 
 # reaccommodate_passenger_atomic returns (success, seat, message) and records
 # its reason code only in audit_logs; the message prefix identifies it.
-_REFUSAL_PREFIXES = {"Target flight flies ": "DIFFERENT_ROUTE"}
+_REFUSAL_PREFIXES = {
+    "Target flight flies ": "DIFFERENT_ROUTE",
+    "That seat was just taken": "SEAT_TAKEN",  # migration 013
+    "That seat is not on the chosen flight": "SEAT_NOT_ON_FLIGHT",
+    "Seat ": "SEAT_WRONG_CABIN",
+}
 
 
 def refusal_reason(message: str | None) -> str | None:
@@ -265,6 +319,8 @@ class ReaccommodateRequest(BaseModel):
     """
 
     target_flight_id: str = Field(..., examples=["c2eebc99-9c0b-4ef8-bb6d-6bb9bd380a33"])
+    # FR-16: the seat the passenger chose; absent, the procedure picks one.
+    seat_id: uuid.UUID | None = None
 
 
 class HandoffRequest(BaseModel):
@@ -503,6 +559,43 @@ async def find_alternatives(
     }
 
 
+@app.get("/api/flights/{flight_id}/seats")
+async def seat_map(
+    flight_id: uuid.UUID,
+    session: PassengerSession = Depends(current_passenger),
+    pool: asyncpg.Pool = Depends(db.get_pool),
+):
+    """
+    FR-16. The seat map of the passenger's cabin on one of their alternative
+    flights: each seat free or taken, and the cabin's layout with its aisles.
+    Any other flight is 404, so the map cannot be read for flights the
+    booking could not move to.
+    """
+    rows = await _fetch(pool, SQL_SEAT_MAP, session.pnr_code, flight_id)
+    if not rows:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="That flight is not one your booking can move to.",
+        )
+    cabin = rows[0]["cabin_class"]
+    letters = sorted({r["seat_letter"] for r in rows})
+    return {
+        "flight_id": str(flight_id),
+        "cabin_class": cabin,
+        "layout": seat_layout(rows[0]["aircraft_type"], cabin, letters),
+        "seats": [
+            {
+                "seat_id": r["seat_id"],
+                "seat_number": r["seat_number"],
+                "row": r["seat_row"],
+                "letter": r["seat_letter"],
+                "status": "free" if r["free"] else "taken",
+            }
+            for r in rows
+        ],
+    }
+
+
 def _explained(rows, booking) -> list[dict]:
     """The alternatives with their reasons and badges (kestrel.api.explain)."""
     if booking is None:
@@ -608,6 +701,7 @@ async def reaccommodate_passenger(
                 session.pnr_code,  # from the token, never the request body
                 payload.target_flight_id,
                 session.audit_actor(),  # server-derived, unforgeable
+                payload.seat_id,
             )
         except asyncpg.DataError as exc:
             raise HTTPException(
@@ -626,7 +720,8 @@ async def reaccommodate_passenger(
         if not result["success"]:
             # The procedure's own words, plus which refusal it was when the
             # caller must react differently (the agent offers same-route
-            # flights again after DIFFERENT_ROUTE, migration 011).
+            # flights again after DIFFERENT_ROUTE, migration 011; the client
+            # reloads the seat map after SEAT_TAKEN, migration 013).
             reason = refusal_reason(result["message"])
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
