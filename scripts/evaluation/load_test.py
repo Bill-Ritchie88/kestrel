@@ -21,9 +21,16 @@ Two modes:
              --pool connections, each call its own committed transaction.
              All N are in flight at once; the database sees at most --pool of
              them at a time.
-  api        --runs runs of N = 50: all 50 POST /api/reaccommodate at once
-             against the running REST tier, with tokens minted in-process by
-             issue_token (same SESSION_SECRET as the API, no login throttle).
+  api        --runs runs of each N in --api-sizes (default 50): all N
+             POST /api/reaccommodate at once against the REST tier at
+             --api-base. Against the local tier, tokens are minted in-process
+             by issue_token (same SESSION_SECRET, no login throttle). Against
+             any other base (e.g. the Render deployment, whose secret is not
+             ours) each fixture passenger signs in once through
+             POST /api/auth/session before the timed section; a correct
+             sign-in clears its own throttle count, so nothing is weakened.
+             A deployment that sleeps is polled on /health until online.
+             A run with a 5xx or a request without a response stops the mode.
 
 Checks per run (Table 3.2):
   1. no seat on the target flight is held by more than one booking;
@@ -36,7 +43,10 @@ API runs also need overall p95 <= 1.0 s (NFR-01).
 
     python scripts/evaluation/load_test.py --mode all --csv docs/sprint-2/04-load-test-runs.csv
 
-The API mode needs the services: .\\tasks.ps1 start.
+The API mode needs the services: .\\tasks.ps1 start. Against Render:
+
+    python scripts/evaluation/load_test.py --mode api --api-base https://kestrel-myd3.onrender.com \\
+        --target render --api-sizes 50 --runs 10 --csv run.csv
 """
 
 import argparse
@@ -65,6 +75,7 @@ NO_SEAT = "No economy seats remaining on the target flight."
 PROCEDURE_ACTIONS = ("AUTOMATED_REACCOMMODATION", "REACCOMMODATION_REJECTED")
 API_URL = "http://127.0.0.1:8000"
 API_N = 50
+HEALTH_WAIT_S = 150  # a sleeping Render free instance takes about a minute to wake
 P95_LIMIT_S = 1.0
 
 SQL_CALL = "SELECT * FROM reaccommodate_passenger_atomic($1, $2, $3)"
@@ -227,6 +238,7 @@ class Run:
     facts: dict = field(default_factory=dict)
     deadlocks: int | None = None  # None: pg_stat_database not readable
     checks: dict = field(default_factory=dict)
+    target: str = "local"  # the CSV's target column: where the REST tier ran
 
 
 def evaluate_run(calls: list[Call], n: int, s: int, facts: dict, deadlocks: int | None) -> dict:
@@ -285,7 +297,53 @@ async def call_api(client: httpx.AsyncClient, token: str, target: str) -> Call:
     return Call(r.status_code == 200, str(message), elapsed, r.status_code, app_ms)
 
 
-async def one_run(pool: asyncpg.Pool, run: Run, client: httpx.AsyncClient | None) -> Run:
+# Server-Timing of each sign-in: one indexed query, so the fastest is about one
+# REST tier -> database round trip plus a pool acquire.
+sign_in_app_ms: list[float] = []
+
+
+async def sign_in(client: httpx.AsyncClient, bookings: list[tuple[str, str]]) -> list[str]:
+    """One token per fixture booking from the deployed sign-in endpoint, all at
+    once, so the client also holds one warm connection per later request and
+    no TLS handshake falls inside the timed section. Not timed."""
+
+    async def one(pnr: str) -> str:
+        r = await client.post("/api/auth/session", json={"pnr_code": pnr, "last_name": "Test"})
+        if r.status_code != 200:
+            raise RuntimeError(f"Sign-in for a fixture booking returned {r.status_code}")
+        timing = r.headers.get("server-timing", "")
+        if "dur=" in timing:
+            sign_in_app_ms.append(float(timing.split("dur=")[1]))
+        return r.json()["access_token"]
+
+    return list(await asyncio.gather(*(one(p) for p, _ in bookings)))
+
+
+async def wait_online(client: httpx.AsyncClient, deadline_s: float) -> dict:
+    """Poll /health with back-off until the database is connected or the
+    deadline passes (0: one attempt). Returns the last answer."""
+    start, delay, health = time.monotonic(), 5.0, {}
+    while True:
+        try:
+            r = await client.get("/health")
+            health = r.json() if r.status_code == 200 else {"status": r.status_code}
+        except (httpx.HTTPError, ValueError) as exc:
+            health = {"error": type(exc).__name__}
+        if health.get("database") == "connected" or time.monotonic() - start + delay > deadline_s:
+            return health
+        print(f"[INFO] waiting for {client.base_url}: {health}")
+        await asyncio.sleep(delay)
+        delay = min(delay * 2, 30.0)
+
+
+def server_failure(calls: list[Call]) -> bool:
+    """A 5xx or a request without a response: stop, do not hammer a free tier."""
+    return any(c.status is None or c.status >= 500 for c in calls)
+
+
+async def one_run(
+    pool: asyncpg.Pool, run: Run, client: httpx.AsyncClient | None, remote: bool = False
+) -> Run:
     tag = f"{run.mode[0]}{run.n}r{run.run}"
     try:
         fixture = await create_fixture(pool, tag, run.n, run.s)
@@ -297,10 +355,16 @@ async def one_run(pool: asyncpg.Pool, run: Run, client: httpx.AsyncClient | None
                 )
             )
         else:
-            tokens = [
-                issue_token(pnr_code=p, passenger_id=pid, last_name="Test", rewards_tier="BLUE")[0]
-                for p, pid in fixture.bookings
-            ]
+            tokens = (
+                await sign_in(client, fixture.bookings)
+                if remote
+                else [
+                    issue_token(
+                        pnr_code=p, passenger_id=pid, last_name="Test", rewards_tier="BLUE"
+                    )[0]
+                    for p, pid in fixture.bookings
+                ]
+            )
             run.calls = list(
                 await asyncio.gather(*(call_api(client, t, fixture.target) for t in tokens))
             )
@@ -333,6 +397,7 @@ def row_for(run: Run) -> dict:
     refused = Counter(c.message for c in run.calls if not c.ok)
     app = [c.app_ms / 1000 for c in run.calls if c.app_ms is not None]
     return {
+        "target": run.target,
         "mode": run.mode,
         "n": run.n,
         "s": run.s,
@@ -430,27 +495,49 @@ async def main(args) -> int:
         finally:
             await pool.close()
     if args.mode in ("api", "all"):
-        if not os.getenv("SESSION_SECRET"):
+        remote = args.api_base.rstrip("/") != API_URL
+        if not remote and not os.getenv("SESSION_SECRET"):
             print("[ERROR] SESSION_SECRET is not set: the REST tier would refuse every token.")
             return 1
         pool = await open_pool(2)  # the REST tier's own pool shares the pooler's limit
+        # Keep the sign-in connections open into the timed burst (httpx's default is 5 s).
+        limits = httpx.Limits(max_connections=200, keepalive_expiry=120)
+        stopped = False
         try:
             await cleanup(pool)
-            async with httpx.AsyncClient(base_url=API_URL, timeout=60) as client:
-                health = (await client.get("/health")).json()
+            async with httpx.AsyncClient(
+                base_url=args.api_base, timeout=60, limits=limits
+            ) as client:
+                health = await wait_online(client, HEALTH_WAIT_S if remote else 0)
                 if health.get("database") != "connected":
-                    print(f"[ERROR] REST tier not ready: {health}. Run: .\\tasks.ps1 start")
+                    print(f"[ERROR] REST tier not ready: {health}. Local: .\\tasks.ps1 start")
                     return 1
-                runs = []
-                for k in range(1, args.runs + 1):
-                    run = await one_run(pool, Run("api", API_N, API_N // 2, k, 0), client)
-                    row = row_for(run)
-                    rows.append(row)
-                    save(row)
-                    runs.append(run)
-                    print(f"[RUN] api N={API_N} #{k}: {row['statuses']}, p50={row['p50_ms']} p95={row['p95_ms']} "
-                          f"max={row['max_ms']} ms, {'pass' if row['passed'] else 'FAIL ' + row['failed_checks']}")  # fmt: skip
-                passed &= summarise(f"api N={API_N}", runs, P95_LIMIT_S)
+                for n in args.api_sizes:
+                    runs = []
+                    for k in range(1, args.runs + 1):
+                        sign_in_app_ms.clear()
+                        run = Run("api", n, n // 2, k, 0, target=args.target)
+                        run = await one_run(pool, run, client, remote)
+                        row = row_for(run)
+                        rows.append(row)
+                        save(row)
+                        runs.append(run)
+                        sign_ins = (
+                            f", sign-in app min={min(sign_in_app_ms):.0f} ms"
+                            if sign_in_app_ms
+                            else ""
+                        )
+                        print(f"[RUN] api N={n} #{k}: {row['statuses']}, p50={row['p50_ms']} p95={row['p95_ms']} "
+                              f"max={row['max_ms']} ms, app p95={row['app_p95_ms']} ms{sign_ins}, "
+                              f"{'pass' if row['passed'] else 'FAIL ' + row['failed_checks']}")  # fmt: skip
+                        if server_failure(run.calls):
+                            print("[ERROR] 5xx or no response: stopping (fixture cleaned up).")
+                            stopped = True
+                            break
+                    passed &= summarise(f"api N={n}", runs, P95_LIMIT_S)
+                    if stopped:
+                        passed = False
+                        break
         finally:
             await pool.close()
     if args.csv and rows:
@@ -472,4 +559,9 @@ if __name__ == "__main__":
         "--pool", type=int, default=10, help="asyncpg pool size for the integrity runs"
     )
     parser.add_argument("--csv", help="write one row per run to this file")
+    parser.add_argument("--api-base", default=API_URL, help="REST tier for the API runs")
+    parser.add_argument(
+        "--api-sizes", type=lambda v: [int(x) for x in v.split(",")], default=[API_N]
+    )
+    parser.add_argument("--target", default="local", help="label for the CSV's target column")
     sys.exit(asyncio.run(main(parser.parse_args())))
