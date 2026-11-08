@@ -11,9 +11,15 @@ import 'streaming_client.dart';
 /// A failed request, with the REST tier's own `detail` message when it sent
 /// one. [status] follows IR-02 (401, 409, 422, 429, 502, 503 ...).
 class ApiException implements Exception {
-  ApiException(this.status, this.message);
+  ApiException(this.status, this.message, {this.reason});
   final int status;
   final String message;
+
+  /// Which refusal a 409 was, when the server names it (X-Refusal-Reason:
+  /// DIFFERENT_ROUTE, SEAT_TAKEN ...).
+  final String? reason;
+
+  bool get seatTaken => status == 409 && reason == 'SEAT_TAKEN';
 
   bool get sessionExpired => status == 401;
 
@@ -77,6 +83,7 @@ class KestrelApi {
     throw ApiException(
       res.statusCode,
       detail is String ? detail : _fallback(res.statusCode),
+      reason: res.headers['x-refusal-reason'],
     );
   }
 
@@ -135,11 +142,18 @@ class KestrelApi {
 
   // -- FR-03 ---------------------------------------------------------------
 
-  Future<Map<String, dynamic>> rebook(String flightId) => _send(_http.post(
+  /// Rebooks onto [flightId]: into [seatId] when the passenger chose one
+  /// (FR-16; 409 with [ApiException.seatTaken] if it went first), otherwise
+  /// the server picks the seat.
+  Future<Map<String, dynamic>> rebook(String flightId, {String? seatId}) => _send(_http.post(
         _api('/api/reaccommodate'),
         headers: _headers,
-        body: jsonEncode({'target_flight_id': flightId}),
+        body: jsonEncode({'target_flight_id': flightId, if (seatId != null) 'seat_id': seatId}),
       ));
+
+  /// FR-16: the seats of the passenger's cabin on one of their alternatives.
+  Future<SeatMap> seatMap(String flightId) async =>
+      SeatMap(await _send(_http.get(_api('/api/flights/$flightId/seats'), headers: _headers)));
 
   // -- FR-05 ---------------------------------------------------------------
 

@@ -14,7 +14,7 @@ import '../widgets/common.dart';
 import '../widgets/layout.dart';
 import '../widgets/next_steps.dart';
 import '../widgets/system_state.dart';
-import 'confirm_screen.dart';
+import 'seat_map_screen.dart';
 
 /// M05 / M08 · Assistant (UC2, UC3). Each turn goes to the agent service
 /// (:8001), which calls the REST tier's tools with this passenger's token. The
@@ -168,7 +168,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _choose(Flight f) =>
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => ConfirmScreen(flight: f)));
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => SeatMapScreen(flight: f)));
 
   // -- Event cards ------------------------------------------------------------
 

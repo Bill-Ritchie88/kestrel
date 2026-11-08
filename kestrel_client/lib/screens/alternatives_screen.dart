@@ -11,7 +11,7 @@ import '../widgets/common.dart';
 import '../widgets/layout.dart';
 import '../widgets/shell.dart';
 import '../widgets/skeleton.dart';
-import 'confirm_screen.dart';
+import 'seat_map_screen.dart';
 
 /// M09 · Flights (UC4, FR-03). Same route and cabin, earliest arrival first,
 /// as rows like a flight search: the top five from the TripStore, shown at
@@ -30,7 +30,7 @@ class AlternativesScreen extends StatelessWidget {
   Future<void> _choose(BuildContext context, Flight f) async {
     final store = TripScope.read(context);
     await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => ConfirmScreen(flight: f)),
+      MaterialPageRoute(builder: (_) => SeatMapScreen(flight: f)),
     );
     // Rebooked, or the flight sold out while the passenger was deciding:
     // either way, fetch fresh seats.

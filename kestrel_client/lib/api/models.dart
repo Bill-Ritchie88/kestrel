@@ -35,6 +35,33 @@ class Flight {
   List<Map<String, dynamic>> get includes => _list(json['includes']);
 }
 
+/// One seat of GET /api/flights/{id}/seats.
+class Seat {
+  Seat(this.json);
+  final Map<String, dynamic> json;
+
+  String get id => json['seat_id'] as String? ?? '';
+  String get number => json['seat_number'] as String? ?? '';
+  int get row => (json['row'] as num?)?.toInt() ?? 0;
+  String get letter => json['letter'] as String? ?? '';
+  bool get isFree => json['status'] == 'free';
+}
+
+/// The passenger's cabin on one flight (FR-16). [groups] are the seat
+/// letters between aisles, left to right: "ABC DEF" is [[A, B, C], [D, E, F]].
+class SeatMap {
+  SeatMap(this.json);
+  final Map<String, dynamic> json;
+
+  String get cabin => json['cabin_class'] as String? ?? 'ECONOMY';
+  List<List<String>> get groups => (json['layout'] as String? ?? '')
+      .split(' ')
+      .where((g) => g.isNotEmpty)
+      .map((g) => g.split(''))
+      .toList();
+  List<Seat> get seats => _list(json['seats']).map(Seat.new).toList();
+}
+
 class Booking {
   Booking(this.json);
   final Map<String, dynamic> json;
