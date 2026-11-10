@@ -10,6 +10,8 @@ integrity · NFR-04 retrieval accuracy.
 
 | Document | What it is | Sprint | Requirement |
 |---|---|---|---|
+| [handover.md](handover.md) | Handover: live addresses, demo data, architecture and REST endpoints, running and deploying, measured results, known limitations | 3 | All |
+| [diagrams/README.md](diagrams/README.md) | Architecture, deployment, entity-relationship and rebooking sequence diagrams (Mermaid source, PNG, SVG) with figure captions | 3 | All |
 | [sprint-1/sprint-1-review.md](sprint-1/sprint-1-review.md) | Sprint 1 review: data preparation and development environment | 1 | FR-02, FR-04, NFR-03 |
 | [sprint-2/01-standalone-repository-and-dataset-v2.md](sprint-2/01-standalone-repository-and-dataset-v2.md) | The move to a standalone repository, fixes and dataset v2 (1 October 2026) | 2 | NFR-03 |
 | [sprint-2/02-test-log.md](sprint-2/02-test-log.md) | Every Sprint 2 test actually run: expected result, outcome, correction | 2 | FR-02 to FR-05, NFR-01, NFR-02 |

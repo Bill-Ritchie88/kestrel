@@ -2,17 +2,17 @@
 
 Kestrel runs online at no cost:
 
-| Part | Where | Address (example) |
+| Part | Where | Address |
 |---|---|---|
-| REST tier (`kestrel.api.main`) | Render, free web service, **Frankfurt** | `https://kestrel-api.onrender.com` |
+| REST tier (`kestrel.api.main`) | Render, free web service, **Frankfurt** | `https://kestrel-myd3.onrender.com` |
 | Assistant (`kestrel.agent_service`) | Render, free web service, **Frankfurt** | `https://kestrel-agent.onrender.com` |
-| Kestrel Web (Flutter release build) | Cloudflare Pages, Direct Upload | `https://kestrel-web.pages.dev` |
+| Kestrel Web (Flutter release build) | Cloudflare Pages, Direct Upload | `https://kestrel-web-a20.pages.dev` |
 | Database, auth | Supabase, `eu-central-1` (Frankfurt) — unchanged | — |
 | Model | Gemini API, free tier — unchanged | — |
 
 Both services run in Frankfurt next to the database, so a query costs milliseconds instead of the ~390 ms
-it costs from the laptop in Nairobi. The real addresses depend on the names you choose; use them wherever
-an example address appears below.
+it costs from the laptop in Nairobi. The addresses above are the live ones; Render adds a suffix (`-myd3`)
+and Cloudflare Pages one (`-a20`) when the plain name is taken, so a redeploy under new names changes them.
 
 **Free-tier behaviour to know (and to state in the report):**
 - A Render free service **sleeps after 15 minutes without traffic**; the next request wakes it in about a
@@ -60,14 +60,14 @@ turns stop working whenever a service restarts.
 3. **Environment:** add the REST-tier variables from the table, with `SERVICE=api`. For `ALLOWED_ORIGINS`
    use a placeholder for now (`http://localhost:8080`); it is set to the site's address in step 4.
 4. **Create Web Service.** The first build takes several minutes. Check
-   `https://kestrel-api.onrender.com/health` → it reports the service and the database as online.
+   `https://kestrel-myd3.onrender.com/health` → it reports the service and the database as online.
 
 ## 2. The assistant on Render
 
 Same as step 1, with:
 - **Name:** `kestrel-agent`
 - Variables: the assistant's set from the table, `SERVICE=agent`, and
-  `FASTAPI_BASE_URL=https://kestrel-api.onrender.com` (no trailing slash).
+  `FASTAPI_BASE_URL=https://kestrel-myd3.onrender.com` (no trailing slash).
 - Check `https://kestrel-agent.onrender.com/health`.
 
 Both services redeploy automatically when `main` changes on GitHub.
@@ -79,7 +79,7 @@ Both services redeploy automatically when `main` changes on GitHub.
    ```powershell
    cd kestrel_client
    flutter build web --wasm --release --no-web-resources-cdn `
-     --dart-define=API_BASE=https://kestrel-api.onrender.com `
+     --dart-define=API_BASE=https://kestrel-myd3.onrender.com `
      --dart-define=AGENT_BASE=https://kestrel-agent.onrender.com `
      --dart-define=SUPABASE_URL=<value from .env> `
      --dart-define=SUPABASE_ANON_KEY=<value from .env>
@@ -90,14 +90,14 @@ Both services redeploy automatically when `main` changes on GitHub.
 
 2. Cloudflare dashboard → **Workers & Pages** → **Create** → **Pages** → **Upload assets** (Direct Upload).
    Project name `kestrel-web` → upload the folder `kestrel_client\build\web` → **Deploy**.
-   The site is live at `https://kestrel-web.pages.dev`. To update it later: rebuild, then
+   The site is live at `https://kestrel-web-a20.pages.dev`. To update it later: rebuild, then
    **Create new deployment** in the same project.
 
 ## 4. Connect the pieces
 
-1. Render → `kestrel-api` and `kestrel-agent` → Environment → `ALLOWED_ORIGINS=https://kestrel-web.pages.dev`
+1. Render → `kestrel-api` and `kestrel-agent` → Environment → `ALLOWED_ORIGINS=https://kestrel-web-a20.pages.dev`
    (add `,http://localhost:8080` to keep local testing working) → **Save**; each service restarts.
-2. Supabase → **Authentication** → **URL Configuration**: add `https://kestrel-web.pages.dev` to
+2. Supabase → **Authentication** → **URL Configuration**: add `https://kestrel-web-a20.pages.dev` to
    **Redirect URLs** (Google sign-in returns there). Keep the localhost entries.
 3. Test every screen on the live site, on a laptop and on a phone: guest sign-in, trip, assistant
    (one quick reply, one typed question), flights, confirm and rebook, vouchers, help, staff desk;
@@ -118,8 +118,8 @@ Cloudflare. No account settings change, and the laptop must stay on.
 
 3. Build the site with those two addresses as `API_BASE` and `AGENT_BASE` (step 3.1), then upload it to the
    same Pages project as a **branch deployment** named `backup`. Its address stays the same every time:
-   `https://backup.kestrel-web.pages.dev`.
-4. Add `https://backup.kestrel-web.pages.dev` to `ALLOWED_ORIGINS` in the laptop's `.env` (once), restart the
+   `https://backup.kestrel-web-a20.pages.dev`.
+4. Add `https://backup.kestrel-web-a20.pages.dev` to `ALLOWED_ORIGINS` in the laptop's `.env` (once), restart the
    services, and open the backup address.
 
 The two `trycloudflare.com` addresses change every time the tunnels start, so step 3 is repeated each time.

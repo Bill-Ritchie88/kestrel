@@ -1,6 +1,7 @@
 # Sprint III status
 
-Checked against the code, the tests and `.env` (names only) on 25 October 2026. Each item in the
+Checked against the code, the tests and `.env` (names only) on 25 October 2026; updated on
+10 November 2026 for seat selection and the load test against Render. Each item in the
 Sprint III plan is marked **done** only where the repository shows it. Items marked *owner* need
 the supervisor, an account, money or real participants, so code alone cannot close them.
 
@@ -15,7 +16,9 @@ the supervisor, an account, money or real participants, so code alone cannot clo
 | Policy retrieval (pgvector) | Done for the KQ Conditions of Carriage, EU261 and the Montreal Convention. **KCAA rules are not in the corpus** | Test log PC-01 to PC-06 |
 | Entitlement rules, separate from retrieval | Done | `src/kestrel/entitlements.py` (no import from `policy/`); 27 rule tests |
 | Labelled set and tau calibration | Done: run on 25 Oct, tau 0.66. **`POLICY_TAU` in `.env` is not yet 0.66** | [Retrieval evaluation](../sprint-2/03-retrieval-evaluation.md) |
-| Flutter clients on the live backend | Done (no sample data except the labelled "Example" table on Home) | `kestrel_client/`; 74 widget tests |
+| Flutter clients on the live backend | Done (no sample data except the labelled "Example" table on Home) | `kestrel_client/`; 80 widget tests |
+| Seat selection (FR-16, UC4, mockup M10) | Done. The passenger picks a seat on a seat map or lets Kestrel choose; migration 013 locks a chosen seat `FOR UPDATE NOWAIT` (taken or locked: 409 `SEAT_TAKEN`) and keeps auto-assign on `SKIP LOCKED`. Live on Supabase since 9 November 2026 | [Seat selection](02-seat-selection.md); `tests/integration/test_seat_selection.py` (2 and 10 passengers choosing one seat: exactly one succeeds); seat-map widget tests |
+| NFR-01 on the deployed REST tier | Measured on Render (Frankfurt), 10 runs each: p95 **0.40 s** at N = 10 and **0.70 s** at N = 25 (met); **1.27 s** at N = 50 (**not met** at the client; server time 0.73 s). 0 double seats in every run | [Rerun against Render](../sprint-2/04-load-test.md#rerun-against-render-november-2026) |
 | Credentials rotated; `.env` ignored and absent from history | `.env` is ignored and absent from every ref, including the stash. Rotation (2026-09-24, per README) is *owner* to confirm | `git log --all -- .env` returns nothing; `scripts/ci/check_secrets.py` in CI |
 
 ## 2. Gaps against the plan found in the code

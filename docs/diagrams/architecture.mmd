@@ -1,0 +1,50 @@
+%% Figure: Kestrel system architecture (deployed, Nov 2026)
+flowchart TB
+    subgraph USERS["Users"]
+        direction LR
+        PAX["Passenger browser<br/>(laptop or phone)"]
+        STAFF["Staff browser<br/>(staff desk, staff key)"]
+    end
+
+    WEB["<b>Kestrel Web</b><br/>Flutter, WebAssembly build<br/>Cloudflare Pages (static)"]
+
+    PAX --> WEB
+    STAFF --> WEB
+
+    subgraph PROPOSE["AI decides (proposes only) - no database credentials"]
+        AGENT["<b>Assistant</b> - kestrel.agent_service<br/>FastAPI + LangChain, Render (Frankfurt)<br/>5 tools: find_alternative_flights_tool,<br/>reaccommodate_passenger_tool, search_policy_tool,<br/>get_entitlements_tool, escalate_to_human_tool<br/>quick replies, streaming, conversation memory"]
+    end
+
+    subgraph ENFORCE["Code enforces - every action passes through here"]
+        REST["<b>REST tier</b> - kestrel.api.main<br/>FastAPI, Render (Frankfurt)<br/>signed session token (HMAC-SHA256)<br/>/api/auth, /api/trip, /api/flights/alternatives,<br/>/api/reaccommodate, /api/policy/search,<br/>/api/entitlements, /api/vouchers, /api/handoff,<br/>/api/chat/history, /api/staff/cases<br/>deterministic entitlement rules (vouchers)"]
+        subgraph SUPA["Supabase (eu-central-1, Frankfurt)"]
+            direction LR
+            DB[("<b>Postgres</b><br/>RLS on every table<br/>pgvector: policy_chunks<br/>reaccommodate_passenger_atomic<br/>(row-level locks, same-route rule)")]
+            AUTH["<b>Supabase Auth</b><br/>Google sign-in<br/>emailed 6-digit code"]
+        end
+    end
+
+    subgraph GOOGLE["Google AI"]
+        direction LR
+        LLM["Gemini API<br/>gemini-3.6-flash<br/>(tool choice, replies)"]
+        EMB["Gemini embedding API<br/>gemini-embedding-001<br/>(768-d query vectors)"]
+    end
+
+    WEB -- "HTTPS: sign-in, trip, flights,<br/>rebook, vouchers, staff cases" --> REST
+    WEB -- "HTTPS: chat (streamed)<br/>bearer token" --> AGENT
+    WEB -. "OAuth / email code" .-> AUTH
+    AGENT -- "HTTPS + passenger's bearer token<br/>(requests actions only)" --> REST
+    AGENT -- "prompt + tool schemas" --> LLM
+    REST -- "asyncpg via session pooler" --> DB
+    REST -- "verify access token<br/>GET /auth/v1/user" --> AUTH
+    REST -- "embed question" --> EMB
+
+    classDef ai fill:#fff4e0,stroke:#c77700,stroke-width:2px,color:#111;
+    classDef core fill:#e6f2ff,stroke:#1f5fa8,stroke-width:2px,color:#111;
+    classDef ext fill:#f3f3f3,stroke:#555,stroke-width:1.5px,color:#111;
+    class AGENT ai;
+    class REST,DB,AUTH core;
+    class WEB,PAX,STAFF,LLM,EMB ext;
+    style PROPOSE fill:#fffaf0,stroke:#c77700,stroke-width:2px,stroke-dasharray:6 4
+    style ENFORCE fill:#f5faff,stroke:#1f5fa8,stroke-width:3px
+    style SUPA fill:#ffffff,stroke:#1f5fa8

@@ -1,0 +1,32 @@
+%% Figure: Kestrel deployment (free tiers, November 2026)
+flowchart LR
+    subgraph CLIENT["User device"]
+        BR["Browser<br/>laptop or phone"]
+    end
+    subgraph CF["Cloudflare Pages (global CDN)"]
+        WEB["Kestrel Web<br/>Flutter WebAssembly build<br/>kestrel-web-a20.pages.dev"]
+    end
+    subgraph RENDER["Render, free web services (Frankfurt)<br/>Docker image deploy/Dockerfile"]
+        API["REST tier<br/>SERVICE=api<br/>kestrel-myd3.onrender.com"]
+        AG["Assistant<br/>SERVICE=agent<br/>kestrel-agent.onrender.com"]
+    end
+    subgraph SB["Supabase (eu-central-1, Frankfurt)"]
+        PG[("Postgres 17<br/>pgvector, RLS<br/>session pooler")]
+        AU["Supabase Auth"]
+    end
+    subgraph G["Google AI Studio"]
+        GEM["Gemini API<br/>chat + embeddings"]
+    end
+    GH["GitHub<br/>Bill-Ritchie88/kestrel<br/>CI: lint, tests, build, secret scan"]
+
+    BR -- "HTTPS (static files)" --> WEB
+    BR -- "HTTPS REST" --> API
+    BR -- "HTTPS chat stream" --> AG
+    BR -. "sign-in" .-> AU
+    AG -- "HTTPS + bearer token" --> API
+    AG --> GEM
+    API -- "asyncpg :5432" --> PG
+    API --> AU
+    API -- "embeddings" --> GEM
+    GH -. "auto-deploy on push to main" .-> RENDER
+    GH -. "wrangler pages deploy" .-> CF

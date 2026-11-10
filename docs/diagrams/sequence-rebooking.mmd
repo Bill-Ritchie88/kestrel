@@ -1,0 +1,34 @@
+%% Figure: Rebooking a disrupted passenger (UC4) - the AI proposes, the database decides
+sequenceDiagram
+    autonumber
+    actor P as Passenger
+    participant W as Kestrel Web
+    participant A as Assistant (Gemini + tools)
+    participant R as REST tier
+    participant D as Postgres
+
+    P->>W: Sign in (booking ref + surname)
+    W->>R: POST /api/auth/guest
+    R->>D: look up booking
+    R-->>W: signed session token
+    W->>R: GET /api/trip (token)
+    R->>D: booking, cancelled flight, same-route alternatives
+    R-->>W: trip + recommended flight
+    P->>A: "Rebook me on the next flight"
+    A->>R: find_alternative_flights_tool (token)
+    R-->>A: same-route flights with free seats
+    A-->>P: proposes KQ608, asks to confirm
+    P->>W: Confirm rebooking
+    W->>R: POST /api/reaccommodate (token, flight)
+    R->>D: CALL reaccommodate_passenger_atomic
+    Note over D: lock booking FOR UPDATE<br/>check same route and departure in future<br/>pick seat FOR UPDATE SKIP LOCKED<br/>update booking + seat, write audit row
+    alt seat assigned
+        D-->>R: REACCOMMODATED, seat 4A
+        R->>D: issue vouchers from entitlement rules
+        R-->>W: 200 rebooked + vouchers
+    else refused (DIFFERENT_ROUTE / no seat / departed)
+        D-->>R: refusal code, nothing written
+        R->>D: open hand-off case
+        R-->>W: 409 + hand-off to staff
+    end
+    W-->>P: confirmation screen

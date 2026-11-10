@@ -1,0 +1,98 @@
+%% Figure: Kestrel entity relationship diagram (deployed schema, migrations 000-012)
+erDiagram
+    passengers ||--o{ pnr_bookings : "holds"
+    passengers ||--o| passenger_accounts : "linked sign-in"
+    flights ||--o{ seats : "has"
+    flights ||--o{ pnr_bookings : "original flight"
+    flights ||--o{ pnr_bookings : "new flight"
+    seats |o--o| pnr_bookings : "assigned seat"
+    pnr_bookings ||--o{ vouchers : "entitled to"
+    pnr_bookings ||--o{ audit_logs : "audited by"
+    pnr_bookings ||--o{ chat_messages : "conversation"
+    pnr_bookings ||--o{ handoff_cases : "escalated as"
+
+    passengers {
+        uuid passenger_id PK
+        varchar first_name
+        varchar last_name
+        varchar email
+        varchar phone_number
+        varchar asante_rewards_tier
+    }
+    passenger_accounts {
+        uuid auth_user_id PK
+        uuid passenger_id FK
+        varchar email
+        varchar provider
+        timestamptz linked_at
+    }
+    flights {
+        uuid flight_id PK
+        varchar flight_number
+        varchar origin
+        varchar destination
+        timestamptz departure_time
+        timestamptz arrival_time
+        varchar status
+        varchar disruption_reason
+        timestamptz cancelled_at
+    }
+    seats {
+        uuid seat_id PK
+        uuid flight_id FK
+        varchar seat_number
+        varchar cabin_class
+        varchar status
+        int row_version
+    }
+    pnr_bookings {
+        varchar pnr_code PK
+        uuid passenger_id FK
+        uuid original_flight_id FK
+        uuid reaccommodated_flight_id FK
+        uuid assigned_seat_id FK
+        varchar booking_status
+        timestamptz updated_at
+    }
+    vouchers {
+        uuid voucher_id PK
+        text voucher_code
+        varchar pnr_code FK
+        text entitlement_type
+        numeric amount
+        int points
+        text rule_id
+        text status
+    }
+    audit_logs {
+        uuid log_id PK
+        varchar pnr_code FK
+        varchar actor
+        varchar action
+        jsonb details
+        timestamptz timestamp
+    }
+    chat_messages {
+        bigint message_id PK
+        varchar pnr_code FK
+        varchar role
+        text content
+        timestamptz created_at
+    }
+    handoff_cases {
+        bigint case_id PK
+        varchar pnr_code FK
+        text trigger
+        text question
+        float top_similarity
+        text status
+        text resolved_by
+    }
+    policy_chunks {
+        text chunk_id PK
+        text source
+        text clause_ref
+        text content
+        vector embedding
+        text embedding_model
+    }
