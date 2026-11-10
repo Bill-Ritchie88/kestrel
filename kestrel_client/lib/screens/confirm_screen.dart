@@ -14,14 +14,25 @@ import '../widgets/layout.dart';
 import '../widgets/shell.dart';
 import '../widgets/system_state.dart';
 
-/// M11 · Confirm rebooking (UC4, FR-03). The seat is claimed by the atomic
-/// stored procedure (row lock, SKIP LOCKED); if the last seat goes to someone
-/// else first the server answers 409 and the passenger picks again.
-///
-/// Pops with `true` when the list of flights should be refreshed.
+/// How the Confirm page was left, when not by rebooking or plain Back.
+enum ConfirmOutcome {
+  /// The chosen seat went to someone else first (409 SEAT_TAKEN): pick another.
+  seatTaken,
+
+  /// No seat left in the cabin on this flight: choose another flight.
+  chooseAnotherFlight,
+}
+
+/// M11 · Confirm rebooking (UC4, FR-03, FR-16). The seat is claimed by the
+/// atomic stored procedure: the [seat] the passenger chose (row lock,
+/// NOWAIT), or the first free one (SKIP LOCKED). If it goes to someone else
+/// first the server answers 409 and the page pops with a [ConfirmOutcome].
 class ConfirmScreen extends StatefulWidget {
-  const ConfirmScreen({super.key, required this.flight});
+  const ConfirmScreen({super.key, required this.flight, this.seat});
   final Flight flight;
+
+  /// Null: "Let Kestrel choose".
+  final Seat? seat;
 
   @override
   State<ConfirmScreen> createState() => _ConfirmScreenState();
@@ -40,7 +51,7 @@ class _ConfirmScreenState extends State<ConfirmScreen> {
       _error = null;
     });
     try {
-      final result = await session.api.rebook(widget.flight.id);
+      final result = await session.api.rebook(widget.flight.id, seatId: widget.seat?.id);
       // The confirmation shows the booking the rebooking returned; the trip
       // everywhere else catches up behind it.
       trip?.refreshQuietly();
@@ -50,6 +61,11 @@ class _ConfirmScreenState extends State<ConfirmScreen> {
       );
     } on ApiException catch (e) {
       if (!mounted) return;
+      if (e.seatTaken) {
+        // Back to the seat map, which says so and shows the seats as they are now.
+        Navigator.of(context).pop(ConfirmOutcome.seatTaken);
+        return;
+      }
       final msg = handleApiError(context, e);
       setState(() {
         _soldOut = e.status == 409;
@@ -105,13 +121,25 @@ class _ConfirmScreenState extends State<ConfirmScreen> {
           const SizedBox(height: K.s2),
           FlightOptionCard(flight: f, recommended: false),
           const SizedBox(height: K.s4),
+          if (widget.seat != null) ...[
+            Row(children: [
+              const Icon(Icons.event_seat, size: 22, color: K.glow),
+              const SizedBox(width: K.s2),
+              Text('Seat ${widget.seat!.number} · ${titleCase(f.cabin ?? booking?.cabin ?? 'economy')}',
+                  style: K.dataMd(context)),
+            ]),
+            const SizedBox(height: K.s2),
+          ],
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Icon(Icons.event_seat, size: 18, color: K.textSecondary),
             const SizedBox(width: K.s2),
             Expanded(
               child: Text(
-                'We\'ll hold ${_withArticle(titleCase(f.cabin ?? booking?.cabin ?? 'economy'))} seat for you '
-                'and issue any vouchers you\'re entitled to straight away.',
+                widget.seat != null
+                    ? 'Seat ${widget.seat!.number} is yours once you confirm, and we\'ll issue any '
+                        'vouchers you\'re entitled to straight away.'
+                    : 'We\'ll hold ${_withArticle(titleCase(f.cabin ?? booking?.cabin ?? 'economy'))} seat for you '
+                        'and issue any vouchers you\'re entitled to straight away.',
                 style: t.bodySmall?.copyWith(color: K.textSecondary),
               ),
             ),
@@ -121,7 +149,7 @@ class _ConfirmScreenState extends State<ConfirmScreen> {
           if (_soldOut) ...[
             const SizedBox(height: K.s5),
             SystemStateCard.seatTaken(
-              onChooseAnother: () => Navigator.of(context).pop(true),
+              onChooseAnother: () => Navigator.of(context).pop(ConfirmOutcome.chooseAnotherFlight),
               onPerson: () => askForPerson(context,
                   summary: 'Rebooking refused: the last seat on ${f.number} went to another passenger first.'),
             ),
@@ -135,7 +163,7 @@ class _ConfirmScreenState extends State<ConfirmScreen> {
             const SizedBox(height: K.s3),
             SecondaryButton(
               label: 'Back',
-              onPressed: _busy ? null : () => Navigator.of(context).pop(false),
+              onPressed: _busy ? null : () => Navigator.of(context).pop(),
             ),
           ],
         ],

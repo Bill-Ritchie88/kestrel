@@ -174,7 +174,7 @@ def test_successful_rebooking_issues_entitlements(client, conn, token):
     assert "ENTITLEMENTS_ISSUED" in sqls
     # The procedure receives the token's PNR and a server-derived actor.
     proc_args = next(a for s, a in conn.calls if "reaccommodate_passenger_atomic" in s)
-    assert proc_args == ("S958PC", "f-alt", "PASSENGER:S958PC")
+    assert proc_args == ("S958PC", "f-alt", "PASSENGER:S958PC", None)
 
 
 def test_refused_rebooking_is_409_with_the_procedures_reason(client, conn, token):
@@ -208,6 +208,103 @@ def test_other_refusals_carry_no_reason_header(client, conn, token):
     }
     r = client.post("/api/reaccommodate", json={"target_flight_id": "f-alt"}, headers=token)
     assert "X-Refusal-Reason" not in r.headers
+
+
+# -- FR-16 seat selection (migration 013) --------------------------------------
+
+SEAT_ID = "5f0c3e1a-8d2b-4c6e-9a1f-0b7d2e4c6a88"
+FLIGHT_ID = "0b6f4a3c-1e2d-4f5a-8b9c-7d6e5f4a3b2c"
+
+
+def seat_row(number, free=True, aircraft="738"):
+    return {
+        "seat_id": f"s-{number}", "seat_number": number, "seat_row": int(number[:-1]),
+        "seat_letter": number[-1], "free": free, "aircraft_type": aircraft, "cabin_class": "ECONOMY",
+    }  # fmt: skip
+
+
+def test_seat_map_lists_the_cabin_free_or_taken_with_its_aisles(client, conn, token):
+    conn.routes["AS seat_letter"] = [
+        seat_row(n, free=n != "5B") for n in ("5A", "5B", "5C", "5D", "5E", "5F")
+    ]
+    r = client.get(f"/api/flights/{FLIGHT_ID}/seats", headers=token)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["cabin_class"] == "ECONOMY"
+    assert body["layout"] == "ABC DEF"
+    assert body["seats"][1] == {
+        "seat_id": "s-5B", "seat_number": "5B", "row": 5, "letter": "B", "status": "taken",
+    }  # fmt: skip
+    assert {s["status"] for s in body["seats"]} == {"free", "taken"}
+    # The token's booking, and only a flight that is one of its alternatives.
+    sql, args = next((s, a) for s, a in conn.calls if "AS seat_letter" in s)
+    assert args[0] == "S958PC" and str(args[1]) == FLIGHT_ID
+    assert "alt.flight_id = $2" in sql and "alt.origin = orig.origin" in sql
+    assert "s.cabin_class::text = bk.cabin" in sql
+
+
+def test_seat_map_of_a_flight_that_is_not_an_alternative_is_404(client, conn, token):
+    conn.routes["AS seat_letter"] = []
+    assert client.get(f"/api/flights/{FLIGHT_ID}/seats", headers=token).status_code == 404
+
+
+def test_seat_map_needs_a_token_and_a_flight_uuid(client, conn, token):
+    assert client.get(f"/api/flights/{FLIGHT_ID}/seats").status_code == 401
+    assert client.get("/api/flights/not-a-uuid/seats", headers=token).status_code == 422
+
+
+def test_seat_layout_falls_back_to_one_aisle_for_an_unknown_aircraft():
+    assert main.seat_layout("788", "BUSINESS", list("ACDGHK")) == "AC DG HK"
+    assert main.seat_layout("A220", "ECONOMY", list("ABCDE")) == "ABC DE"
+    assert main.seat_layout(None, "ECONOMY", ["A"]) == "A"
+
+
+def test_a_chosen_seat_is_passed_to_the_procedure(client, conn, token):
+    conn.routes["reaccommodate_passenger_atomic"] = {
+        "success": True, "assigned_seat_number": "5A", "message": "ok",
+    }  # fmt: skip
+    r = client.post(
+        "/api/reaccommodate", json={"target_flight_id": FLIGHT_ID, "seat_id": SEAT_ID}, headers=token
+    )
+    assert r.status_code == 200 and r.json()["assigned_seat"] == "5A"
+    proc_args = next(a for s, a in conn.calls if "reaccommodate_passenger_atomic" in s)
+    assert str(proc_args[3]) == SEAT_ID
+
+
+def test_a_seat_taken_first_is_409_seat_taken(client, conn, token):
+    conn.routes["reaccommodate_passenger_atomic"] = {
+        "success": False, "assigned_seat_number": None,
+        "message": "That seat was just taken. Please pick another.",
+    }  # fmt: skip
+    r = client.post(
+        "/api/reaccommodate", json={"target_flight_id": FLIGHT_ID, "seat_id": SEAT_ID}, headers=token
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"] == "That seat was just taken. Please pick another."
+    assert r.headers["X-Refusal-Reason"] == "SEAT_TAKEN"
+
+
+def test_a_malformed_seat_id_is_422_before_the_database(client, conn, token):
+    r = client.post(
+        "/api/reaccommodate", json={"target_flight_id": FLIGHT_ID, "seat_id": "5A"}, headers=token
+    )
+    assert r.status_code == 422
+    assert not conn.called("reaccommodate_passenger_atomic")
+
+
+def test_the_api_recognises_every_seat_refusal_migration_013_writes():
+    from pathlib import Path
+
+    sql = (Path(__file__).parents[2] / "db/migrations/013_seat_selection.sql").read_text()
+    for message, reason in (
+        ("That seat was just taken. Please pick another.", "SEAT_TAKEN"),
+        ("That seat is not on the chosen flight.", "SEAT_NOT_ON_FLIGHT"),
+        ("Seat 1A is in business; you can choose a seat in economy only.", "SEAT_WRONG_CABIN"),
+    ):
+        assert main.refusal_reason(message) == reason
+    assert "'That seat was just taken. Please pick another.'" in sql
+    assert "'That seat is not on the chosen flight.'" in sql
+    assert "'Seat %s is in %s; you can choose a seat in %s only.'" in sql
 
 
 async def test_ten_guesses_at_once_reach_the_database_at_most_five_times(conn):

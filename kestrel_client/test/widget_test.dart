@@ -651,6 +651,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(choose);
     await tester.pumpAndSettle();
+    await _tapText(tester, 'Let Kestrel choose'); // the seat map (FR-16) comes first
 
     expect(find.text('Confirm your new flight'), findsOneWidget);
     expect(find.byType(TopBar), findsOneWidget); // still inside the layout
@@ -658,6 +659,9 @@ void main() {
 
     await _tapText(tester, 'Back');
     expect(find.text('Confirm your new flight'), findsNothing);
+    expect(find.text('Choose your seat'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
     expect(find.text('Hi, Grace'), findsOneWidget);
   });
 
@@ -668,6 +672,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('KQ102 · Sun 11 Oct'));
     await tester.pumpAndSettle();
+    await _tapText(tester, 'Let Kestrel choose');
 
     expect(find.text('Confirm your new flight'), findsOneWidget);
     expect(find.byType(NavigationBar), findsOneWidget);
@@ -675,6 +680,9 @@ void main() {
     await tester.binding.handlePopRoute(); // Android back / browser back gesture
     await tester.pumpAndSettle();
     expect(find.text('Confirm your new flight'), findsNothing);
+    expect(find.text('Choose your seat'), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
     // Still signed in, back on My trip where the passenger left it.
     expect(find.byType(NavigationBar), findsOneWidget);
     expect(find.text('KQ102 · Sun 11 Oct'), findsOneWidget);
@@ -1169,6 +1177,7 @@ void main() {
   testWidgets('409 on rebooking: "That seat was just taken", then choose another flight', (tester) async {
     await _signIn(tester, screen: laptop, backend: _Backend(rebookStatus: 409));
     await _tap(tester, find.text('Choose').first);
+    await _tapText(tester, 'Let Kestrel choose');
     await _tapText(tester, 'Confirm rebooking');
 
     expect(find.text('That seat was just taken'), findsOneWidget);
@@ -1283,6 +1292,7 @@ void main() {
     expect(find.text('KESTREL RECOMMENDS'), findsOneWidget);
     expect(find.textContaining('Your best option is KQ102'), findsOneWidget);
     await _tapText(tester, 'Review and confirm');
+    await _tapText(tester, 'Let Kestrel choose');
     expect(find.text('Confirm your new flight'), findsOneWidget);
     expect(find.textContaining('KQ102'), findsWidgets);
   });
@@ -1304,6 +1314,7 @@ void main() {
 
     // Rebooked through the REST tier (Confirm), not by the assistant.
     await _tap(tester, find.byType(FlightOptionCard).first);
+    await _tapText(tester, 'Let Kestrel choose');
     await _tapText(tester, 'Confirm rebooking');
     expect(find.text("You're rebooked"), findsOneWidget);
 

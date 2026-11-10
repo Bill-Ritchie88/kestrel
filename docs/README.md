@@ -5,7 +5,7 @@ Organised by sprint. Design notes and future work apply across sprints. Database
 
 Requirements: FR-01 sign-in · FR-02 policy corpus · FR-03 alternative flights · FR-04 entitlements ·
 FR-05 hand-off and scope guard · FR-06 booking-reference authentication · FR-07 atomic rebooking with audit ·
-FR-08 passenger interface · FR-09 staff queue · NFR-01/02 response time and concurrency · NFR-03 data
+FR-08 passenger interface · FR-09 staff queue · FR-16 seat selection · NFR-01/02 response time and concurrency · NFR-03 data
 integrity · NFR-04 retrieval accuracy.
 
 | Document | What it is | Sprint | Requirement |
@@ -28,6 +28,7 @@ integrity · NFR-04 retrieval accuracy.
 | [sprint-3/00-status.md](sprint-3/00-status.md) | Sprint III status: remaining build work checked against the code, gaps and owner actions | 3 | All |
 | [sprint-3/01-usability-test-plan.md](sprint-3/01-usability-test-plan.md) | Usability test plan for Kestrel Web: participants, consent, five tasks, SUS questionnaire, notes sheet, analysis | 3 | FR-08 |
 | [sprint-3/usability/02-session-script.md](sprint-3/usability/02-session-script.md) | Usability test kit: facilitator script (five tasks, success criteria, time limits), [participant sheets](sprint-3/usability/03-participant-sheet.md), [SUS questionnaire](sprint-3/usability/04-sus-questionnaire.md), results sheets ([tasks](sprint-3/usability/05-results-template-tasks.csv), [SUS](sprint-3/usability/05-results-template-sus.csv)) scored by `scripts/evaluation/score_usability.py`, [findings template](sprint-3/usability/06-findings-template.md); bookings from `scripts/data/create_usability_bookings.py` | 3 | FR-08 |
+| [sprint-3/02-seat-selection.md](sprint-3/02-seat-selection.md) | Seat selection: seat map, migration 013, NOWAIT for a chosen seat vs SKIP LOCKED for auto-assign, 409 `SEAT_TAKEN` | 3 | FR-16, FR-07, NFR-03 |
 | [design/assistant-intelligence-features.md](design/assistant-intelligence-features.md) | Design of the assistant's recommendations, explanations, suggestions and frustration hand-off | 2 | FR-03, FR-05, FR-08 |
 | [design/database-connection-pool.md](design/database-connection-pool.md) | How the REST tier's database connection pool is sized and kept warm | 2 | NFR-01, NFR-02 |
 | [future-work/ml-disruption-prediction.md](future-work/ml-disruption-prediction.md) | Proposal: a supervised model that predicts flight disruption (pending approval) | Future | — |

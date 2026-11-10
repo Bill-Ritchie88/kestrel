@@ -42,7 +42,7 @@ in `kestrel.entitlements` decide what the passenger gets.
 | REST tier | `src/kestrel/api/` | Endpoints, session tokens and login limits (`auth.py`), account sign-in (`accounts.py`), booking and vouchers (`booking.py`), flight reasons (`explain.py`), conversation memory (`history.py`) |
 | Agent service | `src/kestrel/agent_service.py`, `agent.py` | Chat turns, streamed; quick replies without the model; frustration hand-off (`frustration.py`) |
 | Rules | `src/kestrel/entitlements.py`, `handoff.py`, `policy/` | Entitlements, hand-off cases, policy retrieval |
-| Database | `db/migrations/` | Numbered migrations 000-012 |
+| Database | `db/migrations/` | Numbered migrations 000-013 |
 
 ---
 
@@ -111,6 +111,7 @@ Apply the migrations **in this order** in the Supabase SQL editor:
 | 010 | `db/migrations/010_chat_memory_and_frustration.sql` | `chat_messages` (conversation memory) and the `FRUSTRATION` hand-off trigger. |
 | 011 | `db/migrations/011_rebooking_same_route.sql` | Procedure: refuses a flight on another route (`DIFFERENT_ROUTE`). |
 | 012 | `db/migrations/012_cancelled_at_and_history_cap.sql` | `flights.cancelled_at` (set by a trigger) and a 100-turn cap per booking on `chat_messages`. |
+| 013 | `db/migrations/013_seat_selection.sql` | Procedure: optional chosen seat (`p_seat_id`, `SEAT_TAKEN`); 3-argument calls still work. |
 | — | `db/seeds/reset_demo_state.sql` | Repeatable reset to a known disrupted state. Not a migration; run with `make reset`. |
 
 Migration 003 corrects five defects in 001, each covered by a test in
@@ -220,7 +221,7 @@ kestrel/
 │   ├── agent.py, agent_service.py  Agent tier (uvicorn kestrel.agent_service:app)
 │   ├── entitlements.py, handoff.py, frustration.py, suggestions.py
 │   └── policy/                   Policy chunking, embeddings, retrieval
-├── db/migrations/                000-012, applied in order
+├── db/migrations/                000-013, applied in order
 ├── db/seeds/reset_demo_state.sql
 ├── deploy/                       Dockerfile, Cloud Run and Fly.io configuration
 ├── scripts/                      Dataset, reset, ingestion, evaluation, smoke and latency scripts

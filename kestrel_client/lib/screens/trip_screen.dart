@@ -13,7 +13,7 @@ import '../state/recommend.dart';
 import '../widgets/next_steps.dart';
 import '../widgets/shell.dart';
 import '../widgets/skeleton.dart';
-import 'confirm_screen.dart';
+import 'seat_map_screen.dart';
 
 /// My trip: the passenger's dashboard. The trip as a ticket, the flights they
 /// can move to (or, once rebooked, their vouchers), where they are in the
@@ -36,7 +36,7 @@ class _TripScreenState extends State<TripScreen> {
   Future<void> _choose(Flight f) async {
     final store = TripScope.read(context);
     await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => ConfirmScreen(flight: f)),
+      MaterialPageRoute(builder: (_) => SeatMapScreen(flight: f)),
     );
     store.refreshQuietly();
   }

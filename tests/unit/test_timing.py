@@ -26,7 +26,7 @@ def test_each_request_is_logged_with_ids_masked_and_no_query(tmp_path, monkeypat
     monkeypatch.setattr(jsonlog, "LOG_DIR", tmp_path)
     client = TestClient(main.app)
     client.post("/api/staff/cases/20419/resolve?note=secret", json={})
-    client.get("/api/flights/KQX89A/seats")  # no such route
+    client.get("/api/flights/KQX89A/menu")  # no such route
     client.get("/api/booking/ABCDEF")  # no such route, an all-letter reference
     token, _ = issue_token(pnr_code="S958PC", passenger_id="p", last_name="W", rewards_tier=None)
     client.get("/api/me", headers={"Authorization": f"Bearer {token}"})
