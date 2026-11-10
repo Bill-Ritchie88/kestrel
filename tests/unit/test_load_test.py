@@ -1,15 +1,19 @@
 """
 Unit tests for the pure parts of the load-test harness (NFR-01, NFR-03):
-the percentile, the post-condition checks and the fixture cleanup queries.
+the percentile, the post-condition checks, the fixture cleanup queries and,
+for runs against a deployment, the health wait, sign-in and stop-on-5xx.
 
-No database: the harness is loaded from scripts/evaluation by path.
+No database or network: the harness is loaded from scripts/evaluation by path.
 """
 
+import asyncio
 import importlib.util
+import json
 import math
 import re
 from pathlib import Path
 
+import httpx
 import pytest
 
 PATH = Path(__file__).resolve().parents[2] / "scripts" / "evaluation" / "load_test.py"
@@ -141,3 +145,74 @@ def test_row_for_request_without_response(lt):
     assert row["statuses"] == "200 x1; 409 x1; None x1"
     assert row["max_ms"] == "600" and not row["passed"]
     assert "refusals_are_no_seat" in row["failed_checks"]
+    assert row["target"] == "local"
+
+
+def test_server_failure_stops_on_5xx_or_no_response(lt):
+    ok = [lt.Call(True, "ok", 0.1, 200), lt.Call(False, lt.NO_SEAT, 0.1, 409)]
+    assert not lt.server_failure(ok)
+    assert lt.server_failure([lt.Call(False, "boom", 0.1, 503)])
+    assert lt.server_failure([lt.Call(False, "ReadTimeout", math.nan)])
+
+
+def _client(handler):
+    return httpx.AsyncClient(base_url="https://api.test", transport=httpx.MockTransport(handler))
+
+
+def test_wait_online_polls_until_database_connected(lt, monkeypatch):
+    answers = iter([httpx.Response(502), {"database": "disconnected"}, {"database": "connected"}])
+    sleeps = []
+
+    def handler(request):
+        a = next(answers)
+        return a if isinstance(a, httpx.Response) else httpx.Response(200, json=a)
+
+    async def fake_sleep(s):
+        sleeps.append(s)
+
+    monkeypatch.setattr(lt.asyncio, "sleep", fake_sleep)
+
+    async def go():
+        async with _client(handler) as c:
+            return await lt.wait_online(c, 150)
+
+    assert asyncio.run(go()) == {"database": "connected"}
+    assert sleeps == [5.0, 10.0]  # backs off between polls
+
+
+def test_wait_online_single_attempt_without_deadline(lt):
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json={"database": "disconnected"})
+
+    async def go():
+        async with _client(handler) as c:
+            return await lt.wait_online(c, 0)
+
+    assert asyncio.run(go()) == {"database": "disconnected"}
+    assert len(calls) == 1
+
+
+def test_sign_in_one_token_per_booking_and_fails_loudly(lt):
+    def handler(request):
+        body = json.loads(request.content)
+        assert request.url.path == "/api/auth/session" and body["last_name"] == "Test"
+        if body["pnr_code"] == "9L0002":
+            return httpx.Response(429)
+        return httpx.Response(
+            200,
+            json={"access_token": "t-" + body["pnr_code"]},
+            headers={"Server-Timing": "app;dur=12.5"},
+        )
+
+    async def go(bookings):
+        async with _client(handler) as c:
+            return await lt.sign_in(c, bookings)
+
+    lt.sign_in_app_ms.clear()
+    assert asyncio.run(go([("9L0000", "a"), ("9L0001", "b")])) == ["t-9L0000", "t-9L0001"]
+    assert lt.sign_in_app_ms == [12.5, 12.5]
+    with pytest.raises(RuntimeError, match="429"):
+        asyncio.run(go([("9L0002", "c")]))

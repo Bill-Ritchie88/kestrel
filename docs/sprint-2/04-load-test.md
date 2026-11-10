@@ -135,3 +135,100 @@ refusals over 10 connections give a p50 of 7–8 s. Pool sizes, timeouts and cod
   the hold/lock path were not exercised.
 - **The API test exercises one endpoint.** It sends no agent traffic and no login requests, and has no
   think-time between requests: it is the worst case of 50 passengers pressing "rebook" in the same instant.
+
+## Rerun against Render (November 2026)
+
+Run 8 November 2026, 20:06–20:13 UTC, by the same `scripts/evaluation/load_test.py`, now pointed at the
+deployed REST tier with `--api-base https://kestrel-myd3.onrender.com --target render`. One row per run in
+[04-load-test-runs.csv](04-load-test-runs.csv), where the new `target` column reads `render` (the Sprint II rows
+read `local`).
+
+### What changed in the method
+
+| | Sprint II (30 Oct) | Render rerun (8 Nov) |
+|---|---|---|
+| REST tier | laptop in Nairobi, one uvicorn process | Render free web service, Frankfurt, same code from `main` |
+| REST tier → database | ~390 ms per round trip (Nairobi → Frankfurt) | measured below: a few ms (both in Frankfurt) |
+| Client → REST tier | same machine | laptop in Nairobi → Render over HTTPS |
+| Tokens | minted in-process with the local `SESSION_SECRET` | the deployment's secret is not ours: each fixture passenger signs in once through `POST /api/auth/session` **before** the timed section; only the rebooking calls are timed |
+| Harness pool | 2 connections, fixture set-up and checks only | unchanged, 2 |
+
+Everything else is as in [Method](#method): a fresh synthetic fixture per run (`LT9000`/`LT9001`, NBO → LTX,
+`9L…` bookings), all N requests at once, the same checks, cleanup in a `finally` block with a leftover count.
+The sign-ins run all at once, so the client already holds one warm HTTPS connection per request and no TLS
+handshake falls inside the timed section. A correct sign-in clears its own throttle count, so no request was
+throttled and nothing on the server was relaxed. No pool size, timeout or setting was changed on Render or
+Supabase.
+
+Before measuring, the harness polled `/health` until the database was connected (the instance was already
+awake), then one N = 50 run was made and discarded as a warm-up (p95 1289 ms, in line with what followed).
+
+### Results
+
+Latency in ms over all requests of the runs: client wall time from Nairobi, and the REST tier's own time
+(`Server-Timing: app`, from request arrival to the start of the response).
+
+| N | S | runs | statuses (all runs) | wall p50 | wall p95 | wall max | app p50 | app p95 | duplicate seats | successes = S | deadlocks | checks |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 10 | 5 | 10 | 200 × 50, 409 × 50 | 309 | **397** | 417 | 73 | 177 | 0 | every run | 0 | 10 / 10 pass |
+| 25 | 12 | 10 | 200 × 120, 409 × 130 | 582 | **701** | 795 | 294 | 409 | 0 | every run | 0 | 10 / 10 pass |
+| 50 | 25 | 10 | 200 × 250, 409 × 250 | 1000 | **1270** | 1319 | 499 | 727 | 0 | every run | 0 | 10 / 10 pass |
+| 50 (Sprint II, local) | 25 | 10 | 200 × 250, 409 × 250 | 7783 | 10098 | 11456 | — | 10014 | 0 | every run | 0 | 10 / 10 pass |
+
+Every refusal was a 409 with `No economy seats remaining on the target flight.` Every run had seat conservation
+(BOOKED = held) and one procedure audit row per call. No 5xx, no request without a response, no 429 from the
+900 sign-ins, warm-up included (all 200), no `EMAXCONNSESSION`. After every run the leftover count was 0 in every table.
+
+**Demo data unchanged.** A read-only snapshot taken before the warm-up and again after the last run was
+identical: the 571 bookings on any `KQ606` (original or rebooked) or belonging to Kristina Edwards or Charles
+Mueller — PNR, status, flights, seat and seat status, `updated_at` — the 21 `KQ606` flights with their BOOKED
+seat counts, and the row counts of `flights`, `seats`, `passengers`, `pnr_bookings`, `passenger_accounts`,
+`vouchers` and `audit_logs`. The only writes were the fixture's, and it was removed.
+
+### Is NFR-01 met?
+
+**At N = 50, by the Sprint II measure (client wall time p95 ≤ 1.0 s): not met — 1.27 s, against 10.1 s from the
+laptop.** It is met at N = 25 (0.70 s) and N = 10 (0.40 s). The REST tier's own p95 is within the target at every
+N (0.73 s at N = 50). So the deployed system answers 50 simultaneous rebookings within a second, but a passenger
+in Nairobi waits about 1.3 s for the slowest of them.
+
+### Where the time goes
+
+- **Database round trips — the Sprint II bottleneck is gone.** A sign-in is one indexed query; its fastest
+  `Server-Timing` per run was **5–17 ms** (pool acquire + query from Frankfurt). The same kind of query from the
+  laptop took **371–401 ms** (`SELECT 1`, measured before and after the runs). That 20–80× shorter round trip is
+  what took the server time at N = 50 from 10.0 s to 0.73 s.
+- **Queueing for the REST tier's pool of 10.** Server time grows with N although each request does the same work:
+  app p50 **73 ms at N = 10**, 294 ms at N = 25, 499 ms at N = 50. At N = 10 every request has a connection; at 25 and
+  50 most wait for one, and each success holds its connection for about eight round trips (procedure,
+  entitlements transaction, booking reload). Requests that want the same seats also wait for each other's row
+  locks in the procedure; the harness cannot separate that wait from the pool wait.
+- **The client's network.** `/health` (app time 0.3 ms) took **206–221 ms** wall time from the laptop over a warm
+  connection: about 210 ms of every request is the Nairobi → Frankfurt round trip, which no server change
+  removes. At N = 50 wall minus app time is about 500 ms at the median: the round trip, the response bodies after
+  the first byte (`Server-Timing` is stamped when the response starts), Render's proxy, and the laptop handling
+  50 responses at once.
+- **Render free CPU.** One Python process on a shared, small CPU allowance serialises JSON, token checks and
+  asyncpg work for all 50 requests. Not measured separately; it is part of the app time above.
+- **Cold start.** Not in these numbers: the instance was awake and a warm-up run was discarded. A request that
+  wakes a sleeping free instance takes about a minute (see [deploy/README.md](../../deploy/README.md)), far beyond
+  any target.
+
+### Recommendations
+
+1. **One round trip per rebooking.** Issue the entitlements and return the reloaded booking inside
+   `reaccommodate_passenger_atomic` (or a wrapper procedure), so a success holds a connection for one call
+   instead of about eight. This shortens the pool queue directly and costs nothing.
+2. **A bigger pool.** The REST tier's 10 connections are bounded by the session pooler's 15 slots. Moving the
+   REST tier to Supabase's transaction pooler (asyncpg already runs with `statement_cache_size=0`) or a paid
+   Supabase tier would allow more; not changed here.
+3. **A paid Render instance**: more CPU, and no sleeping.
+4. **Keep-warm** for demos and test sessions: an external ping of `/health` more often than every 15 minutes.
+   On the free plan 750 instance hours a month cover one service kept awake all month, not both.
+5. **Measure from a client in Europe** (or report server time) when the question is the system's response
+   time rather than the passenger's network.
+
+### Limitations of the rerun
+
+- One client, one network (Nairobi), one evening; the numbers describe this deployment on the free tiers.
+- The sign-ins add 50 untimed requests before each run; their load ends before the timed burst starts.
