@@ -120,6 +120,8 @@ switch ($Target) {
     "smoke"    { & $Py scripts/evaluation/smoke_test.py }
     "data"     { & $Py scripts/data/generate_dataset.py --truncate --days 7 --seed 42 }
     "reset"    { & $Py scripts/data/reset_demo.py }
+    "usability" { & $Py scripts/data/create_usability_bookings.py }
+    "usability-cleanup" { & $Py scripts/data/create_usability_bookings.py --cleanup }
     "api"      { & $Py -m uvicorn kestrel.api.main:app --reload }
     "agent-api" { & $Py -m uvicorn kestrel.agent_service:app --port 8001 --reload }
     "web"      { Invoke-Web }
@@ -154,6 +156,8 @@ switch ($Target) {
             @("smoke",    "Verify DB connection and stored procedure"),
             @("data",     "Regenerate the synthetic dataset"),
             @("reset",    "Reset the demo data to now"),
+            @("usability", "Create or refresh the six usability-test bookings (prints references)"),
+            @("usability-cleanup", "Remove the usability-test flight, passengers and bookings"),
             @("api",      "Run the REST tier with reload"),
             @("agent-api","Run the agent service (Flutter chat) on :8001"),
             @("web",      "Release build of the website, served on http://localhost:8080"),
