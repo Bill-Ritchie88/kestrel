@@ -73,3 +73,7 @@ node_modules/
 /Kenya Airways PLC _ Conditions of Carriage.pdf
 /.mcp.json
 *.bak
+
+# Claude Code worktrees and local state; Cloudflare Wrangler cache
+.claude/
+.wrangler/
