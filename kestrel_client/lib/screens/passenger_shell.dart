@@ -156,7 +156,7 @@ class _PassengerShellState extends State<PassengerShell> {
           title: const Row(children: [
             KestrelMark(size: 30),
             SizedBox(width: K.s3),
-            Text('Kestrel'),
+            Flexible(child: Text('Kestrel AI assistant', maxLines: 1, overflow: TextOverflow.ellipsis)),
           ]),
           actions: [
             AccountMenu(booking: booking, onSignOut: _signOut, onUnlink: _unlink),

@@ -42,7 +42,7 @@ class KestrelApp extends StatelessWidget {
         child: PublicScope(
           public: public,
           child: MaterialApp(
-            title: 'Kestrel Web — disruption assistant',
+            title: 'Kestrel AI assistant',
             debugShowCheckedModeBanner: false,
             theme: kestrelTheme(),
             darkTheme: kestrelTheme(),

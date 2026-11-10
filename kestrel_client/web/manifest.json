@@ -1,6 +1,6 @@
 {
-    "name": "Kestrel Web — disruption assistant",
-    "short_name": "Kestrel Web",
+    "name": "Kestrel AI assistant",
+    "short_name": "Kestrel AI",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#060608",

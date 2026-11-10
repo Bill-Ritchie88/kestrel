@@ -682,7 +682,7 @@ void main() {
 
   testWidgets('brand line, app title and disclaimer', (tester) async {
     await _pump(tester, _Backend().client, screen: laptop);
-    expect(tester.widget<MaterialApp>(find.byType(MaterialApp)).title, 'Kestrel Web — disruption assistant');
+    expect(tester.widget<MaterialApp>(find.byType(MaterialApp)).title, 'Kestrel AI assistant');
     expect(find.text('KENYA AIRWAYS'), findsNothing);
     expect(find.textContaining(disclaimer), findsOneWidget); // Home footer
 
@@ -693,7 +693,7 @@ void main() {
     await tester.enterText(find.byType(TextFormField).at(0), 'a27z99');
     await tester.enterText(find.byType(TextFormField).at(1), 'Edwards');
     await _tap(tester, find.byKey(GuestBookingForm.submitKey));
-    expect(find.text('Disruption assistant'), findsOneWidget); // sidebar brand line
+    expect(find.text('AI assistant'), findsOneWidget); // sidebar brand line
     expect(find.text(disclaimer), findsOneWidget); // bottom of the sidebar
   });
 

@@ -39,7 +39,7 @@ class PublicLogo extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     return Semantics(
-      label: 'Kestrel, disruption assistant${prototypeTag ? ', prototype' : ''}',
+      label: 'Kestrel AI assistant${prototypeTag ? ', prototype' : ''}',
       excludeSemantics: true,
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Container(

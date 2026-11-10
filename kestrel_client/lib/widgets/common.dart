@@ -74,7 +74,7 @@ class BrandLockup extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     return Semantics(
-      label: 'Kestrel, disruption assistant',
+      label: 'Kestrel AI assistant',
       header: true,
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -89,7 +89,7 @@ class BrandLockup extends StatelessWidget {
                   Text('KESTREL',
                       maxLines: 1, overflow: TextOverflow.fade, softWrap: false,
                       style: t.titleLarge?.copyWith(letterSpacing: 1)),
-                  Text('Disruption assistant',
+                  Text('AI assistant',
                       maxLines: 1, overflow: TextOverflow.fade, softWrap: false,
                       style: K.label(context).copyWith(color: K.glow, fontSize: 12, letterSpacing: 0.3)),
                 ],
