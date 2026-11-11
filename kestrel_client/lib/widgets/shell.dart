@@ -296,12 +296,14 @@ class TopBar extends StatelessWidget {
     required this.onAsk,
     required this.onSignOut,
     this.onUnlink,
+    this.onDeleteData,
   });
   final Booking booking;
   final bool showAsk;
   final ValueChanged<String> onAsk;
   final VoidCallback onSignOut;
   final VoidCallback? onUnlink;
+  final VoidCallback? onDeleteData;
 
   @override
   Widget build(BuildContext context) {
@@ -324,7 +326,8 @@ class TopBar extends StatelessWidget {
         const SizedBox(width: K.s4),
         PnrChip(booking.pnr),
         const SizedBox(width: K.s3),
-        AccountMenu(booking: booking, onSignOut: onSignOut, onUnlink: onUnlink, showName: true),
+        AccountMenu(
+            booking: booking, onSignOut: onSignOut, onUnlink: onUnlink, onDeleteData: onDeleteData, showName: true),
       ]),
     );
   }
@@ -404,12 +407,20 @@ class PnrChip extends StatelessWidget {
 /// The signed-in passenger, with sign-out in its menu.
 class AccountMenu extends StatelessWidget {
   const AccountMenu(
-      {super.key, required this.booking, required this.onSignOut, this.onUnlink, this.showName = false});
+      {super.key,
+      required this.booking,
+      required this.onSignOut,
+      this.onUnlink,
+      this.onDeleteData,
+      this.showName = false});
   final Booking booking;
   final VoidCallback onSignOut;
 
   /// Shown only when the signed-in account is linked to this booking.
   final VoidCallback? onUnlink;
+
+  /// DR-01 "Delete my account data", likewise for a linked account only.
+  final VoidCallback? onDeleteData;
   final bool showName;
 
   @override
@@ -419,9 +430,16 @@ class AccountMenu extends StatelessWidget {
     return PopupMenuButton<String>(
       tooltip: 'Account',
       position: PopupMenuPosition.under,
-      onSelected: (v) => v == 'unlink' ? onUnlink?.call() : onSignOut(),
+      onSelected: (v) => switch (v) {
+        'unlink' => onUnlink?.call(),
+        'delete' => onDeleteData?.call(),
+        _ => onSignOut(),
+      },
       itemBuilder: (_) => [
         if (onUnlink != null) const PopupMenuItem(value: 'unlink', child: Text('Unlink this booking')),
+        if (onDeleteData != null)
+          const PopupMenuItem(
+              value: 'delete', child: Text('Delete my account data', style: TextStyle(color: K.glow))),
         const PopupMenuItem(value: 'signout', child: Text('Sign out')),
       ],
       child: Padding(

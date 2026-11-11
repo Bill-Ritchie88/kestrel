@@ -136,6 +136,19 @@ SQL_AUDIT_UNLINK = """
     VALUES (NULL, $1, 'ACCOUNT_UNLINKED', $2::jsonb);
 """
 
+# "Delete my account data" (DR-01): the conversation of every booking of the
+# passenger the account was linked to. Bookings and audit_logs are kept
+# (docs/sprint-3/03-account-deletion.md).
+SQL_DELETE_CHAT_FOR_PASSENGER = """
+    DELETE FROM chat_messages
+    WHERE pnr_code IN (SELECT pnr_code FROM pnr_bookings WHERE passenger_id = $1::uuid);
+"""
+
+SQL_AUDIT_DELETE = """
+    INSERT INTO audit_logs (pnr_code, actor, action, details)
+    VALUES (NULL, $1, 'ACCOUNT_DATA_DELETED', $2::jsonb);
+"""
+
 # ---------------------------------------------------------------------------
 # Supabase
 # ---------------------------------------------------------------------------
@@ -241,6 +254,44 @@ async def unlink(conn, *, user_id: str, provider: str) -> bool:
             json.dumps({"passenger_id": row["passenger_id"]}),
         )
     return True
+
+
+async def delete_data(conn, *, user_id: str, provider: str) -> tuple[str | None, int]:
+    """DR-01. Remove this account's link and the chat history of the linked
+    passenger's bookings, and audit it, in one transaction. Returns
+    (passenger_id, or None if there was no link; chat messages deleted)."""
+    async with conn.transaction():
+        row = await conn.fetchrow(SQL_DELETE_LINK, user_id)
+        if row is None:
+            return None, 0
+        result = await conn.execute(SQL_DELETE_CHAT_FOR_PASSENGER, row["passenger_id"])
+        count = (result or "").split()[-1:]  # "DELETE 3"
+        deleted = int(count[0]) if count and count[0].isdigit() else 0
+        await conn.execute(
+            SQL_AUDIT_DELETE,
+            audit_actor(provider, user_id),
+            json.dumps({"passenger_id": row["passenger_id"], "chat_messages_deleted": deleted}),
+        )
+    return row["passenger_id"], deleted
+
+
+async def delete_auth_user(user_id: str) -> bool:
+    """Delete the Supabase Auth user through the admin API. Needs
+    SUPABASE_SERVICE_ROLE_KEY (server only, never in the client). Without it,
+    or if Supabase refuses, returns False: the identity must then be removed
+    by hand in the Supabase dashboard (Authentication -> Users)."""
+    url = os.getenv("SUPABASE_URL", "").rstrip("/")
+    service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+    if not url or not service_key:
+        return False
+    try:
+        res = await _http().delete(
+            f"{url}/auth/v1/admin/users/{user_id}",
+            headers={"Authorization": f"Bearer {service_key}", "apikey": service_key},
+        )
+    except httpx.HTTPError:
+        return False
+    return res.status_code in (200, 204, 404)  # 404: already gone
 
 
 def suggestion_to_dict(row) -> dict:

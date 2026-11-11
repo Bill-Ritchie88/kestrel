@@ -137,6 +137,14 @@ class KestrelApi {
         body: jsonEncode({'access_token': accessToken}),
       ));
 
+  /// DR-01 "Delete my account data": the signed-in account's link, chat
+  /// history and (if the server can) sign-in identity. Bookings are kept.
+  Future<Map<String, dynamic>> deleteAccountData(String accessToken) => _send(_http.delete(
+        _api('/api/auth/account'),
+        headers: _headers,
+        body: jsonEncode({'access_token': accessToken}),
+      ));
+
   /// The whole trip in one call (the client's TripStore).
   Future<Trip> trip() async => Trip(await _send(_http.get(_api('/api/trip'), headers: _headers)));
 

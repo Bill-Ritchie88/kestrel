@@ -99,6 +99,17 @@ class Session extends ChangeNotifier {
     signOut();
   }
 
+  /// DR-01: deletes the account's link, its chat history and, when the
+  /// server can, its sign-in identity, then signs out. Returns the manual
+  /// step the server reports when the identity could not be removed.
+  Future<String?> deleteAccountData() async {
+    final account = linkedAccount;
+    if (account == null) return null;
+    final body = await api.deleteAccountData(account.accessToken);
+    signOut();
+    return body['manual_step'] as String?;
+  }
+
   /// Signs out of Kestrel and of the account (Supabase) together.
   void signOut() {
     api.logout();

@@ -12,6 +12,8 @@ Endpoint map (Sprint 2):
     POST /api/auth/session               FR-01, FR-06  PNR + surname -> bearer token
     POST /api/auth/account               social sign-in (Supabase), linked once -> bearer token
     DELETE /api/auth/account/link        unlink the signed-in account (its own link only)
+    DELETE /api/auth/account             DR-01  delete the account's data (link, chat history,
+                                         sign-in identity); bookings and audit kept
     GET  /api/me                         the passenger's booking and flights
     GET  /api/trip                       booking, alternatives, entitlements, cases and
                                          suggestions in one call (the client's TripStore)
@@ -519,6 +521,28 @@ async def unlink_account(payload: UnlinkRequest, pool: asyncpg.Pool = Depends(db
     async with pool.acquire() as conn:
         unlinked = await accounts.unlink(conn, user_id=user_id, provider=provider)
     return {"unlinked": unlinked}
+
+
+@app.delete("/api/auth/account")
+async def delete_account_data(payload: UnlinkRequest, pool: asyncpg.Pool = Depends(db.get_pool)):
+    """DR-01 'Delete my account data', for the account Supabase vouches for
+    only (the request names no passenger or booking): its link, the chat
+    history of the linked passenger's bookings, and the Supabase sign-in
+    identity when a service-role key is configured. Bookings and audit_logs
+    are kept: they are the airline's record (NFR-03)."""
+    user_id, _email, provider = await accounts.verify_supabase_user(payload.access_token)
+    async with pool.acquire() as conn:
+        passenger_id, deleted = await accounts.delete_data(conn, user_id=user_id, provider=provider)
+    identity_deleted = await accounts.delete_auth_user(user_id)
+    return {
+        "unlinked": passenger_id is not None,
+        "chat_messages_deleted": deleted,
+        "sign_in_identity_deleted": identity_deleted,
+        "manual_step": None
+        if identity_deleted
+        else "Your sign-in identity must be removed manually: Kestrel staff will remove it. "
+        "Until then it can still sign in, but it is linked to no booking.",
+    }
 
 
 @app.get("/api/me")

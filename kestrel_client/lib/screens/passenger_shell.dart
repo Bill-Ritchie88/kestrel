@@ -9,6 +9,7 @@ import '../state/trip.dart';
 import '../theme.dart';
 import '../widgets/api_error.dart';
 import '../widgets/common.dart';
+import '../widgets/confirm_dialog.dart';
 import '../widgets/layout.dart';
 import '../widgets/shell.dart';
 import 'alternatives_screen.dart';
@@ -102,9 +103,39 @@ class _PassengerShellState extends State<PassengerShell> {
       ? null
       : () async {
           final public = PublicScope.read(context);
+          final session = SessionScope.read(context);
+          final ok = await confirmDestructive(context,
+              title: 'Unlink this booking?',
+              message: 'Your account will no longer open booking ${session.booking?.pnr ?? ''}. '
+                  'The booking itself and your conversation with the assistant are not changed, '
+                  'and you will be signed out. You can link it again the next time you sign in.',
+              action: 'Unlink');
+          if (!ok || !mounted) return;
           try {
-            await SessionScope.read(context).unlinkBooking();
+            await session.unlinkBooking();
             public.notice = 'Booking unlinked. Your account will ask for a booking next time you sign in.';
+          } catch (e) {
+            if (mounted) handleApiError(context, e);
+          }
+        };
+
+  /// DR-01. Null (no menu item) unless the account is linked to this booking.
+  VoidCallback? get _deleteData => SessionScope.read(context).linkedAccount == null
+      ? null
+      : () async {
+          final public = PublicScope.read(context);
+          final session = SessionScope.read(context);
+          final ok = await confirmDestructive(context,
+              title: 'Delete your account data?',
+              message: 'This deletes the link between your account and this booking, your conversation '
+                  'history with the assistant, and your sign-in. It cannot be undone, and you will be '
+                  'signed out.\n\nYour booking and the airline\'s record of changes to it are kept: '
+                  'they belong to your ticket, not to this app.',
+              action: 'Delete my data');
+          if (!ok || !mounted) return;
+          try {
+            final manual = await session.deleteAccountData();
+            public.notice = 'Your account data was deleted.${manual == null ? '' : ' $manual'}';
           } catch (e) {
             if (mounted) handleApiError(context, e);
           }
@@ -142,6 +173,7 @@ class _PassengerShellState extends State<PassengerShell> {
                     onAsk: _ask,
                     onSignOut: _signOut,
                     onUnlink: _unlink,
+                    onDeleteData: _deleteData,
                   ),
                   Expanded(child: body),
                 ]),
@@ -159,7 +191,7 @@ class _PassengerShellState extends State<PassengerShell> {
             Flexible(child: Text('Kestrel AI assistant', maxLines: 1, overflow: TextOverflow.ellipsis)),
           ]),
           actions: [
-            AccountMenu(booking: booking, onSignOut: _signOut, onUnlink: _unlink),
+            AccountMenu(booking: booking, onSignOut: _signOut, onUnlink: _unlink, onDeleteData: _deleteData),
             const SizedBox(width: K.s2),
           ],
         ),

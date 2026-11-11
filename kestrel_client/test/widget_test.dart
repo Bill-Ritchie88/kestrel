@@ -262,6 +262,9 @@ class _Backend {
   /// The bodies DELETE /api/auth/account/link received.
   final unlinkRequests = <Map<String, dynamic>>[];
 
+  /// The bodies DELETE /api/auth/account (DR-01) received.
+  final deleteRequests = <Map<String, dynamic>>[];
+
   /// The bodies POST /api/auth/account received.
   final accountRequests = <Map<String, dynamic>>[];
 
@@ -325,6 +328,15 @@ class _Backend {
         if (path == '/api/auth/account/link' && req.method == 'DELETE') {
           unlinkRequests.add(jsonDecode(req.body) as Map<String, dynamic>);
           return json({'unlinked': true});
+        }
+        if (path == '/api/auth/account' && req.method == 'DELETE') {
+          deleteRequests.add(jsonDecode(req.body) as Map<String, dynamic>);
+          return json({
+            'unlinked': true,
+            'chat_messages_deleted': 2,
+            'sign_in_identity_deleted': false,
+            'manual_step': 'Your sign-in identity must be removed manually.',
+          });
         }
         if (path == '/api/auth/account') {
           final body = jsonDecode(req.body) as Map<String, dynamic>;
@@ -828,9 +840,49 @@ void main() {
     await _tapText(tester, 'Continue with Google');
     await _tap(tester, find.byTooltip('Account'));
     await _tapText(tester, 'Unlink this booking');
+    // Asked first; Cancel changes nothing.
+    expect(find.text('Unlink this booking?'), findsOneWidget);
+    await _tapText(tester, 'Cancel');
+    expect(backend.unlinkRequests, isEmpty);
+    expect(find.text('Hi, Grace'), findsOneWidget);
+    await _tap(tester, find.byTooltip('Account'));
+    await _tapText(tester, 'Unlink this booking');
+    await _tapText(tester, 'Unlink');
     expect(backend.unlinkRequests.single, {'access_token': _FakeAuth.accessToken});
     expect(find.text('Hi, Grace'), findsNothing); // signed out
   });
+
+  for (final (name, screen) in [('375 px', const Size(375, 667)), ('phone', phone), ('laptop', laptop)]) {
+    testWidgets('DR-01: "Delete my account data" asks, in red, then deletes and signs out ($name)', (tester) async {
+      final backend = _Backend();
+      // Home's narrowest layout has no "Sign in" text button: sign in wider, then narrow.
+      await _pump(tester, backend.client, screen: screen.width < phone.width ? phone : screen);
+      await _tapText(tester, 'Sign in');
+      await _tapText(tester, 'Continue with Google');
+      tester.view.physicalSize = screen;
+      await tester.pumpAndSettle();
+      await _tap(tester, find.byTooltip('Account'));
+      await _tapText(tester, 'Delete my account data');
+      expect(find.text('Delete your account data?'), findsOneWidget);
+      expect(find.textContaining('cannot be undone'), findsOneWidget);
+      expect(find.textContaining('Your booking and the airline'), findsOneWidget);
+      final action = find.widgetWithText(FilledButton, 'Delete my data');
+      expect(tester.widget<FilledButton>(action).style!.backgroundColor!.resolve({}), K.crimson);
+      for (final button in [action, find.widgetWithText(TextButton, 'Cancel')]) {
+        final size = tester.getSize(button);
+        expect(size.height, greaterThanOrEqualTo(K.touch));
+        expect(size.width, greaterThanOrEqualTo(K.touch));
+      }
+      expect(tester.takeException(), isNull); // no overflow, even at 375 px
+      await _tapText(tester, 'Cancel');
+      expect(backend.deleteRequests, isEmpty);
+      await _tap(tester, find.byTooltip('Account'));
+      await _tapText(tester, 'Delete my account data');
+      await _tapText(tester, 'Delete my data');
+      expect(backend.deleteRequests.single, {'access_token': _FakeAuth.accessToken});
+      expect(find.text('Hi, Grace'), findsNothing); // signed out
+    });
+  }
 
   testWidgets('a booking opened without a link offers no unlink, and a guest none either', (tester) async {
     final backend = _Backend()..linksAccount = false;
@@ -840,6 +892,7 @@ void main() {
     await _tap(tester, find.byTooltip('Account'));
     expect(find.text('Sign out'), findsWidgets);
     expect(find.text('Unlink this booking'), findsNothing);
+    expect(find.text('Delete my account data'), findsNothing);
   });
 
   testWidgets('back from Google in the browser: the app finishes signing in', (tester) async {
