@@ -281,3 +281,22 @@ def test_only_whole_rights_words_start_a_speculative_search():
 def test_a_slow_rebooking_is_not_cut_off_at_ten_seconds():
     """Issue #37."""
     assert agent.http_client.timeout.read >= 30
+
+
+def test_the_prompt_version_is_semver_plus_a_hash_of_the_prompt():
+    """Migration 014: provenance for each answer."""
+    import hashlib
+    import re
+
+    assert re.fullmatch(r"\d+\.\d+\.\d+\+[0-9a-f]{8}", agent.PROMPT_VERSION)
+    semver, digest = agent.PROMPT_VERSION.split("+")
+    assert semver == agent.PROMPT_SEMVER
+    assert digest == hashlib.sha256(agent.SYSTEM_PROMPT.encode()).hexdigest()[:8]
+    # Any edit to the prompt text changes it, even with the same semver.
+    assert agent.prompt_version(agent.SYSTEM_PROMPT + " ") != agent.PROMPT_VERSION
+    assert agent.prompt_version(agent.SYSTEM_PROMPT) == agent.PROMPT_VERSION
+
+
+def test_every_turn_reports_its_prompt_version(rest):
+    result = agent.run_agent("Hi", llm=ScriptedLLM([AIMessage(content="Hello.")]))
+    assert result.to_dict()["prompt_version"] == agent.PROMPT_VERSION

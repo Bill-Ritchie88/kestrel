@@ -155,6 +155,10 @@ class HandoffCase {
   String? get resolvedAt => json['resolved_at'] as String?;
   String? get resolvedBy => json['resolved_by'] as String?;
   String? get resolutionNote => json['resolution_note'] as String?;
+
+  /// The system-prompt version of the booking's latest assistant turn
+  /// (migration 014); null for conversations from before it.
+  String? get promptVersion => json['prompt_version'] as String?;
 }
 
 /// A suggested next step (src/kestrel/suggestions.py): a quick reply

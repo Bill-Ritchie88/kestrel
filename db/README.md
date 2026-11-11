@@ -7,7 +7,7 @@ file name, so a renamed file would look like a new, unapplied migration. A corre
 Requirements: FR-01 sign-in · FR-02 policy corpus · FR-03 alternative flights · FR-04 entitlements ·
 FR-05 hand-off and scope guard · FR-06 booking-reference authentication · FR-07 atomic rebooking with audit ·
 FR-08 passenger interface · FR-09 staff queue · FR-16 seat selection · NFR-01/02 response time and concurrency · NFR-03 data
-integrity · DR-xx data requirements.
+integrity · DR-09 provenance of each assistant answer · DR-xx data requirements.
 
 | Migration | What it adds | Sprint | Requirement |
 |---|---|---|---|
@@ -25,3 +25,4 @@ integrity · DR-xx data requirements.
 | `011_rebooking_same_route.sql` | Rebooking refuses a flight on another route (`DIFFERENT_ROUTE`, issue #2) | 2 | FR-03, FR-07 |
 | `012_cancelled_at_and_history_cap.sql` | `flights.cancelled_at` set by a trigger (issue #13); chat history capped at 100 turns per booking (issue #12) | 2 | FR-04, FR-05 |
 | `013_seat_selection.sql` | Rebooking takes an optional chosen seat (`p_seat_id`, `FOR UPDATE NOWAIT`, `SEAT_TAKEN`/`SEAT_WRONG_CABIN`/`SEAT_NOT_ON_FLIGHT`); the 3-argument signature is dropped and replaced in one transaction, so old calls still resolve. Undo: `db/rollbacks/013_seat_selection_down.sql` | 3 | FR-16, FR-07, NFR-03 |
+| `014_prompt_version.sql` | `chat_messages.prompt_version` (nullable text, at most 64 characters): the system-prompt version behind each assistant turn, shown on the staff desk. `ADD COLUMN IF NOT EXISTS`; RLS unchanged (on, no policy). **Not applied yet**: apply before deploying the API that writes it. Preview: `KESTREL_PREVIEW_MIGRATION=db/migrations/014_prompt_version.sql pytest tests/integration/test_sql_statements.py` (rolled back). Undo: `db/rollbacks/014_prompt_version_down.sql` | 3 | DR-09 |

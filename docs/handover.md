@@ -82,7 +82,7 @@ See `diagrams/architecture.png`, `diagrams/deployment.png`, `diagrams/erd.png` a
 |---|---|
 | `src/kestrel/` | Python back end: `api/` (REST tier), `agent/` and `agent_service.py` (assistant), `entitlements.py` |
 | `kestrel_client/` | Kestrel Web (Flutter) |
-| `db/migrations/000–013` | Database schema, procedure, row-level security, policy retrieval, accounts, chat memory, same-route rule, seat selection |
+| `db/migrations/000–014` | Database schema, procedure, row-level security, policy retrieval, accounts, chat memory, same-route rule, seat selection, prompt version per assistant turn (014: **apply before deploying** the API that writes it) |
 | `scripts/data/` | Dataset generator, demo reset, policy ingestion, schema export |
 | `scripts/evaluation/` | Retrieval evaluation, load test, latency, smoke test |
 | `scripts/ci/` | Secret scan, Flutter annotations |

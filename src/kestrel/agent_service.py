@@ -236,6 +236,7 @@ def _run(
         "steps": body["steps"],
         "tools": [c["name"] for c in body["tool_calls"]],
         "model": body["model"],
+        "prompt_version": body["prompt_version"],
         "thinking_level": body["thinking_level"],
         **t,
     })
@@ -257,7 +258,9 @@ def save_turns(token: str, message: str, reply: str) -> None:
                 continue
             response = agent.http_client.post(
                 f"{agent.FASTAPI_BASE_URL}/api/chat/history",
-                json={"role": role, "content": content[:4000]},
+                json={"role": role, "content": content[:4000]}
+                # Provenance of each answer (migration 014).
+                | ({"prompt_version": agent.PROMPT_VERSION} if role == "assistant" else {}),
                 # The REST tier saves an assistant turn only with this key.
                 headers={**headers, "X-Agent-Key": AGENT_HISTORY_KEY} if role == "assistant" else headers,
             )

@@ -1450,6 +1450,27 @@ void main() {
     expect(find.text('Frustrated passenger'), findsWidgets);
   });
 
+  testWidgets('staff see which assistant prompt version the case ran on (migration 014)', (tester) async {
+    await _pump(tester, _Backend(staffQueue: [{..._case(), 'prompt_version': '2.0.0+3fa9c2d1'}]).client,
+        screen: laptop);
+    await _toStaffForm(tester);
+    await tester.enterText(find.byType(TextFormField).at(0), 'Wanjiru');
+    await tester.enterText(find.byType(TextFormField).at(1), 'desk-key');
+    await _tapText(tester, 'Open the desk');
+    expect(find.text('Assistant prompt'), findsOneWidget);
+    expect(find.text('2.0.0+3fa9c2d1'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a case from before migration 014 shows the prompt as not recorded', (tester) async {
+    await _pump(tester, _Backend().client, screen: laptop); // _case() has no prompt_version
+    await _toStaffForm(tester);
+    await tester.enterText(find.byType(TextFormField).at(0), 'Wanjiru');
+    await tester.enterText(find.byType(TextFormField).at(1), 'desk-key');
+    await _tapText(tester, 'Open the desk');
+    expect(find.text('Not recorded'), findsOneWidget);
+  });
+
   testWidgets('503 from the assistant: "busy right now", with the way back to the trip', (tester) async {
     await _signIn(tester, backend: _Backend(chatStatus: 503));
     await tester.tap(find.text('Assistant'));

@@ -7,9 +7,14 @@ unit tests cannot see because they use a fake connection: in Sprint 2 the
 hand-off INSERT used its PNR parameter in two places that implied different
 types, and the server refused it ("inconsistent types deduced for parameter
 $1"), which would have broken every hand-off. Nothing is executed.
+
+With KESTREL_PREVIEW_MIGRATION=<path to a migration> the migration runs first
+inside a transaction that is always rolled back, so a new migration and the
+statements that need it are proved together before it is applied.
 """
 
 import os
+from pathlib import Path
 
 import asyncpg
 import pytest
@@ -33,9 +38,15 @@ STATEMENTS = sorted(
 @pytest.fixture
 async def conn():
     connection = await asyncpg.connect(os.environ["DATABASE_URL"], statement_cache_size=0)
+    transaction = connection.transaction()
+    await transaction.start()
     try:
+        preview = os.getenv("KESTREL_PREVIEW_MIGRATION")
+        if preview:
+            await connection.execute(Path(preview).read_text(encoding="utf-8"))
         yield connection
     finally:
+        await transaction.rollback()
         await connection.close()
 
 
@@ -49,4 +60,9 @@ async def test_statement_prepares_against_the_live_schema(conn, name, sql):
         "SELECT 1 FROM information_schema.columns WHERE table_name = 'flights' AND column_name = 'cancelled_at'"
     ):
         pytest.skip("flights.cancelled_at does not exist yet: apply migration 012")
+    if "prompt_version" in sql and not await conn.fetchval(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_name = 'chat_messages' AND column_name = 'prompt_version'"
+    ):
+        pytest.skip("chat_messages.prompt_version does not exist yet: apply migration 014")
     await conn.prepare(sql)

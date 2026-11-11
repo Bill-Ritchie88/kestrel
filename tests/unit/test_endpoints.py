@@ -598,7 +598,7 @@ def test_a_turn_is_appended_and_bounded(client, conn, token):
     r = client.post("/api/chat/history", json={"role": "user", "content": "Hi"}, headers=token)
     assert r.status_code == 201
     args = next(a for s, a in conn.calls if "INSERT INTO chat_messages" in s)
-    assert args == ("S958PC", "user", "Hi")
+    assert args == ("S958PC", "user", "Hi", None)
     too_long = client.post("/api/chat/history", json={"role": "user", "content": "x" * 4001}, headers=token)
     assert too_long.status_code == 422
     bad_role = client.post("/api/chat/history", json={"role": "system", "content": "x"}, headers=token)
@@ -641,6 +641,38 @@ def test_a_passenger_token_cannot_store_an_assistant_turn(client, conn, token, m
     assert client.post("/api/chat/history", json=fake, headers=wrong).status_code == 403
     agent = {**token, "X-Agent-Key": "agent-key-for-tests"}
     assert client.post("/api/chat/history", json=fake, headers=agent).status_code == 201
+
+
+def test_an_assistant_turn_is_stored_with_its_prompt_version(client, conn, token, monkeypatch):
+    """Migration 014: provenance for each answer."""
+    monkeypatch.setattr(main, "AGENT_HISTORY_KEY", "agent-key-for-tests")
+    conn.routes["INSERT INTO chat_messages"] = lambda pnr, role, content, version: {
+        "role": role, "content": content, "created_at": NOW, "prompt_version": version}  # fmt: skip
+    agent = {**token, "X-Agent-Key": "agent-key-for-tests"}
+    body = {"role": "assistant", "content": "Here.", "prompt_version": "2.0.0+3fa9c2d1"}
+    r = client.post("/api/chat/history", json=body, headers=agent)
+    assert r.status_code == 201 and r.json()["prompt_version"] == "2.0.0+3fa9c2d1"
+    sql, args = next((s, a) for s, a in conn.calls if "INSERT INTO chat_messages" in s)
+    assert "prompt_version" in sql and args == ("S958PC", "assistant", "Here.", "2.0.0+3fa9c2d1")
+    # A passenger's own turn never carries one, whatever the body says.
+    user = client.post("/api/chat/history", json={**body, "role": "user"}, headers=token)
+    assert user.json()["prompt_version"] is None
+    too_long = client.post("/api/chat/history", json={**body, "prompt_version": "x" * 65}, headers=agent)
+    assert too_long.status_code == 422
+
+
+def test_old_turns_without_a_prompt_version_still_read(client, conn, token):
+    conn.routes["FROM chat_messages"] = [TURN]  # no prompt_version column in the row
+    assert client.get("/api/chat/history", headers=token).json()["turns"][0]["prompt_version"] is None
+
+
+def test_staff_cases_show_the_prompt_version_of_the_latest_assistant_turn(client, conn, monkeypatch):
+    monkeypatch.setattr(main, "STAFF_API_KEY", "staff-secret")
+    conn.routes["FROM handoff_cases"] = [{**CASE, "prompt_version": "2.0.0+3fa9c2d1"}, {**CASE, "case_id": 8}]
+    body = client.get("/api/staff/cases", headers={"X-Staff-Key": "staff-secret"}).json()
+    assert [c["prompt_version"] for c in body["cases"]] == ["2.0.0+3fa9c2d1", None]  # NULL: an old case
+    sql = next(s for s, _ in conn.calls if "FROM handoff_cases" in s)
+    assert "m.role = 'assistant'" in sql and "ORDER BY m.created_at DESC" in sql
 
 
 def test_without_a_configured_key_no_assistant_turn_is_stored(client, conn, token, monkeypatch):

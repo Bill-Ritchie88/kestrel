@@ -71,8 +71,16 @@ SQL_LIST_FOR_PNR = f"""
     SELECT {_COLUMNS} FROM handoff_cases WHERE pnr_code = $1 ORDER BY created_at DESC;
 """  # noqa: S608
 
+# Staff only (migration 014): the system-prompt version of the booking's latest
+# assistant turn, so a member of staff can tell which rules the assistant ran on.
+_PROMPT_VERSION = """
+    (SELECT m.prompt_version FROM chat_messages m
+     WHERE m.pnr_code = handoff_cases.pnr_code AND m.role = 'assistant'
+     ORDER BY m.created_at DESC, m.message_id DESC LIMIT 1) AS prompt_version
+"""
+
 SQL_LIST_BY_STATUS = f"""
-    SELECT {_COLUMNS} FROM handoff_cases
+    SELECT {_COLUMNS}, {_PROMPT_VERSION} FROM handoff_cases
     WHERE ($1::text IS NULL OR status = $1)
     ORDER BY created_at DESC
     LIMIT $2;
@@ -82,7 +90,7 @@ SQL_RESOLVE = f"""
     UPDATE handoff_cases
     SET status = 'RESOLVED', resolved_at = now(), resolved_by = $2, resolution_note = $3
     WHERE case_id = $1 AND status = 'OPEN'
-    RETURNING {_COLUMNS};
+    RETURNING {_COLUMNS}, {_PROMPT_VERSION};
 """  # noqa: S608
 
 # Taken first in open_case's transaction: two requests at once for the same
@@ -113,6 +121,8 @@ def case_to_dict(row) -> dict:
         "resolved_at": row["resolved_at"].isoformat() if row["resolved_at"] else None,
         "resolved_by": row["resolved_by"],
         "resolution_note": row["resolution_note"],
+        # Staff queries only; NULL when no assistant turn has a version yet.
+        "prompt_version": row.get("prompt_version"),
     }
 
 
