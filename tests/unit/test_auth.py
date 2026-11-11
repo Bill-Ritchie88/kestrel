@@ -144,3 +144,77 @@ def test_the_login_limit_dictionary_does_not_keep_every_guess(monkeypatch):
     auth.register_failed_attempt("NEW001")
     assert set(auth._failed_attempts) == {"NEW001"}
     auth._failed_attempts.clear()
+
+
+# -- FR-17 rebooking confirmation tokens ----------------------------------------
+
+FLIGHT = "0B6F4A3C-1E2D-4F5A-8B9C-7D6E5F4A3B2C"
+SEAT = "5f0c3e1a-8d2b-4c6e-9a1f-0b7d2e4c6a88"
+
+
+def _verify(token, pnr_code="S958PC", flight_id=FLIGHT, seat_id=None):
+    return auth.verify_confirmation(token, pnr_code=pnr_code, flight_id=flight_id, seat_id=seat_id)
+
+
+@pytest.fixture
+def confirmation():
+    auth._used_confirmations.clear()
+    token, ttl = auth.issue_confirmation(pnr_code="S958PC", flight_id=FLIGHT, seat_id=None)
+    assert ttl == auth.CONFIRMATION_TTL_SECONDS == 300
+    return token
+
+
+class TestConfirmationToken:
+    def test_verifies_for_its_own_booking_flight_and_seat_choice(self, confirmation):
+        assert _verify(confirmation, flight_id=FLIGHT.lower())
+
+    @pytest.mark.parametrize(
+        ("kwargs", "reason"),
+        [
+            ({"pnr_code": "OTHER1"}, "another booking"),
+            ({"flight_id": "f-other"}, "another flight"),
+            ({"seat_id": SEAT}, "another seat"),
+        ],
+    )
+    def test_refused_for_any_other_rebooking(self, confirmation, kwargs, reason):
+        with pytest.raises(ValueError, match=reason):
+            _verify(confirmation, **kwargs)
+
+    def test_bound_to_a_chosen_seat(self):
+        token, _ = auth.issue_confirmation(pnr_code="S958PC", flight_id=FLIGHT, seat_id=SEAT)
+        assert _verify(token, seat_id=SEAT.upper())
+        with pytest.raises(ValueError, match="another seat"):
+            _verify(token, seat_id=None)
+
+    def test_tampered_payload_is_refused(self, confirmation):
+        payload_b64, sig = confirmation.split(".")
+        payload = json.loads(auth._b64url_decode(payload_b64))
+        payload["flight"] = "f-other"
+        forged = auth._b64url_encode(json.dumps(payload).encode()) + "." + sig
+        with pytest.raises(ValueError, match="Invalid"):
+            _verify(forged, flight_id="f-other")
+
+    @pytest.mark.parametrize("token", ["", "no-dot", "a.b.c"])
+    def test_malformed_is_refused(self, token):
+        with pytest.raises(ValueError):
+            _verify(token)
+
+    def test_expired_is_refused(self, monkeypatch, confirmation):
+        real_time = time.time
+        monkeypatch.setattr(auth.time, "time", lambda: real_time() + auth.CONFIRMATION_TTL_SECONDS + 1)
+        with pytest.raises(ValueError, match="expired"):
+            _verify(confirmation)
+
+    def test_replay_after_use_is_refused(self, confirmation):
+        auth.spend_confirmation(_verify(confirmation))
+        with pytest.raises(ValueError, match="already been used"):
+            _verify(confirmation)
+
+    def test_a_session_token_is_not_a_confirmation_and_vice_versa(self, confirmation):
+        session_token, _ = auth.issue_token(
+            pnr_code="S958PC", passenger_id="p-1", last_name="Whitehead", rewards_tier=None
+        )
+        with pytest.raises(ValueError, match="Invalid"):
+            _verify(session_token)
+        with pytest.raises(ValueError, match="signature"):
+            auth._decode_token(confirmation)

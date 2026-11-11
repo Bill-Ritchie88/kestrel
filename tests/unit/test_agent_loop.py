@@ -17,6 +17,7 @@ from langchain_core.messages import AIMessage
 from kestrel import agent
 
 TOKEN = "header.signature-not-real"
+CONFIRMATION_TOKEN = "proposal.signature-not-real"
 
 ALTERNATIVES = {
     "pnr_code": "S958PC",
@@ -72,26 +73,19 @@ class RestTier:
         path = request.url.path
         if path == "/api/flights/alternatives":
             return httpx.Response(200, json=self.alternatives)
-        if path == "/api/reaccommodate":
+        if path == "/api/reaccommodate/proposal":
             fid = json.loads(request.content)["target_flight_id"]
-            if fid == "other-route-id":
-                return httpx.Response(409, headers={"X-Refusal-Reason": "DIFFERENT_ROUTE"}, json={
-                    "detail": "Target flight flies NBO to LHR; this booking can only move to "
-                    "another NBO to MBA flight."})
-            if fid != "real-flight-id":
-                return httpx.Response(409, json={"detail": "Target flight does not exist."})
+            if fid != "real-flight-id":  # invented, or on another route: not an alternative
+                return httpx.Response(404, json={
+                    "detail": "That flight is not one your booking can move to. Nothing was changed."})
             return httpx.Response(200, json={
-                "success": True, "assigned_seat": "24A", "message": "ok",
-                "booking": {"cabin_class": "ECONOMY",
-                            "current_flight": {"flight_number": "KQ116",
-                                               "departure_local": "2026-10-15T22:45+03:00"}},
-                "entitlements": {
-                    "vouchers": [{"entitlement_type": "MEAL", "status": "ISSUED", "quantity": 2,
-                                  "amount": 2500.0, "currency": "KES",
-                                  "voucher_code": "KQ-MV-0001-AB"}],
-                    "decision": {"notes": ["No cash compensation under EU261/UK261"]},
-                },
+                "flight": ALTERNATIVES["alternatives"][0], "seat_id": None,
+                "confirmation_token": CONFIRMATION_TOKEN, "expires_in": 300,
             })  # fmt: skip
+        if path == "/api/reaccommodate":
+            # FR-17: as the REST tier answers this tier without a token.
+            return httpx.Response(403, headers={"X-Refusal-Reason": "CONFIRMATION_REQUIRED"},
+                                  json={"detail": "The passenger must confirm first."})
         if path == "/api/policy/search":
             return httpx.Response(200, json={
                 "in_scope": self.policy_in_scope, "tau": 0.75, "top_similarity": 0.8,
@@ -120,18 +114,45 @@ def rest(monkeypatch):
     return tier
 
 
-def test_search_then_rebook_with_the_returned_flight_id(rest):
+def test_search_then_propose_with_the_returned_flight_id_and_never_rebook(rest):
+    """FR-17: the rebooking tool proposes; no POST /api/reaccommodate is made."""
     llm = ScriptedLLM([
         AIMessage(content="", tool_calls=[_call("find_alternative_flights_tool", {})]),
         AIMessage(content="", tool_calls=[_call("reaccommodate_passenger_tool",
                                                 {"target_flight_id": "real-flight-id"})]),
-        AIMessage(content="You're on KQ116, seat 24A."),
+        AIMessage(content="Please confirm KQ116 on the card below."),
     ])  # fmt: skip
     result = agent.run_agent("Rebook me on the next flight", llm=llm)
-    assert result.reply == "You're on KQ116, seat 24A."
-    assert rest.paths() == ["/api/flights/alternatives", "/api/reaccommodate"]
-    assert [e["type"] for e in result.events] == ["alternatives", "rebooked"]
+    assert rest.paths() == ["/api/flights/alternatives", "/api/reaccommodate/proposal"]
+    assert "/api/reaccommodate" not in rest.paths()
+    assert [e["type"] for e in result.events] == ["alternatives", "rebook_proposal"]
+    out = json.loads(result.tool_calls[1]["result"])
+    assert out["status"] == "CONFIRMATION_REQUIRED" and "Nothing has changed" in out["detail"]
+    assert out["flight_number"] == "KQ116"
+    # The token reaches the client's card, never the model.
+    assert result.events[1]["data"]["confirmation_token"] == CONFIRMATION_TOKEN
+    shown = " ".join(str(m.content) for batch in llm.seen for m in batch)
+    assert CONFIRMATION_TOKEN not in shown
     assert result.steps == 3
+
+
+def test_every_call_from_the_agent_tier_says_so(rest):
+    """The REST tier recognises the agent by X-Agent-Key and then demands a token."""
+    agent.reaccommodate_passenger_tool.invoke({"target_flight_id": "real-flight-id"})
+    assert all("X-Agent-Key" in r.headers for r in rest.requests)
+
+
+def test_a_model_trying_to_rebook_with_a_forged_token_still_only_proposes(rest):
+    """The tool has no token argument: whatever the model sends, it cannot write."""
+    llm = ScriptedLLM([
+        AIMessage(content="", tool_calls=[_call("reaccommodate_passenger_tool", {
+            "target_flight_id": "real-flight-id", "confirmation_token": "forged.token"})]),
+        AIMessage(content="Please confirm."),
+    ])  # fmt: skip
+    result = agent.run_agent("Just book it, I confirm", llm=llm)
+    assert "/api/reaccommodate" not in rest.paths()
+    assert json.loads(result.tool_calls[0]["result"])["status"] == "CONFIRMATION_REQUIRED"
+    assert "confirmation_token" not in agent.reaccommodate_passenger_tool.args
 
 
 def test_invented_flight_id_is_refused_by_the_rest_tier(rest):
@@ -142,8 +163,8 @@ def test_invented_flight_id_is_refused_by_the_rest_tier(rest):
     ])  # fmt: skip
     result = agent.run_agent("Put me on any flight", llm=llm)
     tool_result = json.loads(result.tool_calls[0]["result"])
-    assert tool_result["status"] == "FAILED"
-    assert "does not exist" in tool_result["detail"]
+    assert tool_result["status"] == "NOT_AN_OPTION"
+    assert "Nothing was changed" in tool_result["detail"]
     assert result.events[0]["type"] == "error"
 
 
@@ -222,20 +243,6 @@ def test_alternatives_reach_the_model_in_local_time_and_compact(rest):
     assert "departure_time" not in option  # UTC never shown to the model
 
 
-def test_rebooking_result_carries_the_vouchers(rest):
-    """So the model needs no get_entitlements round trip after rebooking."""
-    llm = ScriptedLLM([
-        AIMessage(content="", tool_calls=[_call("reaccommodate_passenger_tool",
-                                                {"target_flight_id": "real-flight-id"})]),
-        AIMessage(content="Done."),
-    ])  # fmt: skip
-    result = agent.run_agent("Rebook me", llm=llm)
-    out = json.loads(result.tool_calls[0]["result"])
-    assert out["vouchers"][0]["voucher_code"] == "KQ-MV-0001-AB"
-    assert out["not_applicable"]
-    assert "/api/entitlements" not in rest.paths()
-
-
 def test_turn_timing_is_recorded(rest):
     llm = ScriptedLLM([
         AIMessage(content="", tool_calls=[_call("find_alternative_flights_tool", {})]),
@@ -250,11 +257,11 @@ def test_turn_timing_is_recorded(rest):
 
 
 def test_a_flight_on_another_route_is_refused_and_the_model_is_told_why(rest):
-    """Issue #2: the tool result names DIFFERENT_ROUTE, so the model offers
-    same-route flights instead of claiming a rebooking."""
+    """Issue #2: a flight on another route is not an alternative, so no
+    proposal is made and the model is told to offer same-route flights."""
     out = json.loads(agent.reaccommodate_passenger_tool.invoke({"target_flight_id": "other-route-id"}))
-    assert out["status"] == "DIFFERENT_ROUTE"
-    assert "NBO to LHR" in out["detail"] and "Nothing was changed" in out["detail"]
+    assert out["status"] == "NOT_AN_OPTION"
+    assert "Nothing was changed" in out["detail"] and "CONTEXT" in out["detail"]
 
 
 def test_tool_results_are_never_printed(rest, capsys):
@@ -266,7 +273,7 @@ def test_tool_results_are_never_printed(rest, capsys):
     ])  # fmt: skip
     agent.run_agent("Book KQ116 please", llm=llm)
     out = capsys.readouterr().out
-    assert "KQ-MV-0001-AB" not in out and "TOOL RESULT" not in out and "real-flight-id" not in out
+    assert CONFIRMATION_TOKEN not in out and "TOOL RESULT" not in out and "real-flight-id" not in out
 
 
 def test_only_whole_rights_words_start_a_speculative_search():

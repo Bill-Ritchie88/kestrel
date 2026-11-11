@@ -62,7 +62,8 @@ See `diagrams/architecture.png`, `diagrams/deployment.png`, `diagrams/erd.png` a
    | `GET /api/me`, `GET /api/trip` | FR-08 | Booking and flights; the trip screen in one call |
    | `GET /api/flights/alternatives` | FR-03 | Same route, same cabin, seats left |
    | **`GET /api/flights/{flight_id}/seats`** (new) | FR-16 | Seat map of the passenger's cabin on one of their alternatives; any other flight is 404 |
-   | `POST /api/reaccommodate` (**new optional `seat_id`**) | FR-03, FR-07, FR-16 | Atomic rebooking and entitlements; a chosen seat taken first is **409 `SEAT_TAKEN`** |
+   | `POST /api/reaccommodate/proposal` | FR-17 | The assistant's proposal: the flight and a signed 5-minute, single-use confirmation token; changes nothing |
+   | `POST /api/reaccommodate` (**new optional `seat_id`, `confirmation_token`**) | FR-03, FR-07, FR-16, FR-17 | Atomic rebooking and entitlements; a chosen seat taken first is **409 `SEAT_TAKEN`**; from the agent tier only with a valid token (else **403**) |
    | `GET /api/policy/search` | FR-02, FR-05 | Grounded clauses or a hand-off |
    | `GET /api/entitlements`, `GET /api/vouchers` | FR-04 | What the rules give, with reasons; issued vouchers |
    | `GET`/`POST /api/chat/history` | FR-05, FR-08 | Conversation memory |
@@ -169,7 +170,7 @@ At 50 concurrent rebookings the time goes to queueing for the REST tier's pool o
 1. A usability test with 3–5 users is still to be done. The kit (script, sheets, SUS, scoring, test-day bookings) is in `docs/sprint-3/usability/`.
 2. NFR-01 is met on Render up to 25 concurrent rebookings, not at 50 (see section 7).
 3. There is no account deletion yet. The chat endpoints are not rate limited.
-4. The assistant can rebook on "next available flight" without a separate confirmation step. The web Confirm screen does ask.
+4. Closed (FR-17): the assistant only proposes a rebooking; the passenger confirms it on a card in the chat, and the REST tier refuses the agent tier without that confirmation's token. Used tokens are remembered per process, so with several REST replicas a replay is stopped only by the procedure refusing a second rebooking.
 5. KCAA consumer protection rules are not yet in the policy corpus.
 6. The entitlement amounts are project assumptions pending Kenya Airways confirmation.
 7. The free tiers limit speed and the daily number of model calls. A paid plan or a self-hosted model would remove the sleep and the quota.

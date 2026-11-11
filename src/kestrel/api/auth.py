@@ -60,8 +60,11 @@ def _b64url_decode(data: str) -> bytes:
     return base64.urlsafe_b64decode(data + padding)
 
 
-def _sign(payload_b64: str) -> str:
-    digest = hmac.new(SESSION_SECRET.encode(), payload_b64.encode(), hashlib.sha256).digest()
+def _sign(payload_b64: str, purpose: str = "") -> str:
+    # A different purpose is a different key, so a confirmation token can never
+    # pass as a session token, nor the other way round.
+    key = SESSION_SECRET + (f"|{purpose}" if purpose else "")
+    digest = hmac.new(key.encode(), payload_b64.encode(), hashlib.sha256).digest()
     return _b64url_encode(digest)
 
 
@@ -122,6 +125,72 @@ def _decode_token(token: str) -> PassengerSession:
         last_name=payload["last_name"],
         rewards_tier=payload.get("rewards_tier"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Rebooking confirmation tokens (FR-17).
+#
+# The assistant may only propose a rebooking. POST /api/reaccommodate/proposal
+# returns one of these, bound to the booking, the flight and the seat choice;
+# the passenger's tap on "Confirm rebooking" sends it back. A call from the
+# agent tier without one is refused, so the model cannot skip the step.
+# ---------------------------------------------------------------------------
+
+CONFIRMATION_TTL_SECONDS = 5 * 60
+_CONFIRMATION = "rebook-confirmation"
+
+# shortcut: used tokens are remembered per process, like the login throttle;
+# with several replicas, move this to a table. The procedure also refuses a
+# second rebooking of the same booking, so a replay cannot move it twice.
+_used_confirmations: dict[str, float] = {}
+
+
+def issue_confirmation(*, pnr_code: str, flight_id: str, seat_id: str | None) -> tuple[str, int]:
+    payload = {
+        "pnr": pnr_code,
+        "flight": flight_id.lower(),
+        "seat": seat_id.lower() if seat_id else None,
+        "jti": secrets.token_urlsafe(12),
+        "exp": int(time.time()) + CONFIRMATION_TTL_SECONDS,
+    }
+    payload_b64 = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode())
+    return f"{payload_b64}.{_sign(payload_b64, _CONFIRMATION)}", CONFIRMATION_TTL_SECONDS
+
+
+def verify_confirmation(token: str, *, pnr_code: str, flight_id: str, seat_id: str | None) -> str:
+    """The token's id if it confirms exactly this rebooking; otherwise
+    ValueError with the reason."""
+    try:
+        payload_b64, signature = token.split(".", 1)
+        valid = hmac.compare_digest(signature, _sign(payload_b64, _CONFIRMATION))
+    except (ValueError, TypeError):
+        raise ValueError("Malformed confirmation token.") from None
+    if not valid:
+        raise ValueError("Invalid confirmation token.")
+    try:
+        payload = json.loads(_b64url_decode(payload_b64))
+        jti, exp = str(payload["jti"]), float(payload["exp"])
+    except (ValueError, UnicodeDecodeError, KeyError, TypeError):
+        raise ValueError("Malformed confirmation token.") from None
+    if exp < time.time():
+        raise ValueError("The confirmation has expired. Ask again for this flight.")
+    if payload.get("pnr") != pnr_code:
+        raise ValueError("The confirmation is for another booking.")
+    if payload.get("flight") != flight_id.lower():
+        raise ValueError("The confirmation is for another flight.")
+    if payload.get("seat") != (seat_id.lower() if seat_id else None):
+        raise ValueError("The confirmation is for another seat choice.")
+    if jti in _used_confirmations:
+        raise ValueError("This confirmation has already been used.")
+    return jti
+
+
+def spend_confirmation(jti: str) -> None:
+    now = time.time()
+    # Kept until the token would have expired anyway; then it is refused for that.
+    for key in [k for k, until in _used_confirmations.items() if until < now]:
+        del _used_confirmations[key]
+    _used_confirmations[jti] = now + CONFIRMATION_TTL_SECONDS
 
 
 async def current_passenger(
