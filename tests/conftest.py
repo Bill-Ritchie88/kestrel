@@ -39,6 +39,15 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip)
 
 
+@pytest.fixture(autouse=True)
+def _fresh_rate_limits():
+    """Every test starts with full buckets (kestrel.ratelimit is per process)."""
+    from kestrel import ratelimit
+
+    ratelimit.CHAT.clear()
+    ratelimit.SIGN_IN.clear()
+
+
 @pytest.fixture
 def session_kwargs():
     return {

@@ -43,6 +43,7 @@ from kestrel import (  # noqa: F401  - config loads .env first
     config,
     frustration,
     jsonlog,
+    ratelimit,
 )
 from kestrel.suggestions import after_turn
 
@@ -67,12 +68,15 @@ def _warm_model() -> None:
 
 
 app = FastAPI(title="Project Kestrel - Agent Service", version=__version__, lifespan=lifespan)
+# NFR-05: per bearer token, inside CORS so the browser can read a 429.
+app.add_middleware(ratelimit.RateLimitMiddleware, rules=[("/api/chat", ratelimit.CHAT, True)])
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()],
     allow_credentials=True,
     allow_methods=["GET", "POST"],
     allow_headers=["Authorization", "Content-Type"],
+    expose_headers=["Retry-After"],
 )
 
 
@@ -258,8 +262,9 @@ def save_turns(token: str, message: str, reply: str) -> None:
             response = agent.http_client.post(
                 f"{agent.FASTAPI_BASE_URL}/api/chat/history",
                 json={"role": role, "content": content[:4000]},
-                # The REST tier saves an assistant turn only with this key.
-                headers={**headers, "X-Agent-Key": AGENT_HISTORY_KEY} if role == "assistant" else headers,
+                # The REST tier saves an assistant turn only with this key,
+                # and does not count either turn against the rate limit.
+                headers={**headers, "X-Agent-Key": AGENT_HISTORY_KEY},
             )
             if response.status_code >= 400:
                 print(f"[WARN] Conversation not saved: {response.status_code}", flush=True)

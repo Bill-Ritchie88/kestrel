@@ -207,9 +207,9 @@ def test_both_turns_are_saved_after_the_reply(rest, monkeypatch):
         {"role": "assistant", "content": "Here is what I can do."},
     ]
     assert all(r.headers["Authorization"] == f"Bearer {TOKEN}" for r in rest.requests)
-    # Issue #12: only the assistant's turn carries the service's key.
+    # Issue #12 (assistant turns) and NFR-05 (neither turn counts twice).
     keys = [r.headers.get("X-Agent-Key") for r in rest.requests if r.url.path == "/api/chat/history"]
-    assert keys == [None, agent_service.AGENT_HISTORY_KEY]
+    assert keys == [agent_service.AGENT_HISTORY_KEY] * 2
 
 
 # -- review of 18 Oct ---------------------------------------------------------------

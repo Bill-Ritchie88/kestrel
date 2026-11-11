@@ -44,7 +44,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field
 
-from kestrel import __version__, config  # noqa: F401  - config loads .env first
+from kestrel import __version__, config, ratelimit  # noqa: F401  - config loads .env first
 from kestrel.airports import cities_for
 from kestrel.api import accounts, db, history
 from kestrel.api.auth import (
@@ -249,6 +249,13 @@ app = FastAPI(
 # several times over a mobile connection.
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
+# NFR-05. Inside CORS, so the browser can read a 429 and its Retry-After.
+app.add_middleware(
+    ratelimit.RateLimitMiddleware,
+    rules=[("/api/chat", ratelimit.CHAT, True), ("/api/auth/", ratelimit.SIGN_IN, False)],
+    agent_key=AGENT_HISTORY_KEY,
+)
+
 # The Flutter client (web build) is served from a different origin. Exact
 # origins only: Starlette does not expand wildcards such as localhost:*.
 app.add_middleware(
@@ -257,7 +264,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Authorization", "Content-Type", "X-Staff-Key"],
-    expose_headers=["X-Refusal-Reason"],
+    expose_headers=["X-Refusal-Reason", "Retry-After"],
 )
 # Outermost, so the time covers everything the API does with a request.
 app.add_middleware(RequestTimingMiddleware)
