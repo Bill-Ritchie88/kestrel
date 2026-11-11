@@ -36,7 +36,7 @@ class TestAuthRequest:
 
 
 class TestReaccommodateRequest:
-    def test_carries_only_the_target_flight_and_seat(self):
+    def test_carries_only_the_target_flight_seat_and_confirmation(self):
         """
         Regression guard for the privilege escalation fix.
 
@@ -44,7 +44,7 @@ class TestReaccommodateRequest:
         PNR comes from the session and the actor is derived server-side, or
         the audit trail written by reaccommodate_passenger_atomic is forgeable.
         """
-        assert set(ReaccommodateRequest.model_fields) == {"target_flight_id", "seat_id"}
+        assert set(ReaccommodateRequest.model_fields) == {"target_flight_id", "seat_id", "confirmation_token"}
 
     def test_requires_a_target_flight_id(self):
         with pytest.raises(ValidationError):

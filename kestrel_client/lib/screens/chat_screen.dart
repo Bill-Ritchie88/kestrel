@@ -14,6 +14,7 @@ import '../widgets/common.dart';
 import '../widgets/layout.dart';
 import '../widgets/next_steps.dart';
 import '../widgets/system_state.dart';
+import 'rebook_proposal_card.dart';
 import 'seat_map_screen.dart';
 
 /// M05 / M08 · Assistant (UC2, UC3). Each turn goes to the agent service
@@ -191,6 +192,9 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
         ];
+      case 'rebook_proposal':
+        // FR-17: the assistant proposes; the passenger's tap rebooks.
+        return [RebookProposalCard(proposal: d)];
       case 'rebooked':
         final booking = asMap(d['booking']);
         final vouchers = asList(asMap(d['entitlements'])['vouchers'])

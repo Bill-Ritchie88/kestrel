@@ -26,7 +26,7 @@ the supervisor, an account, money or real participants, so code alone cannot clo
 | Gap | Plan section | Effect | Needs |
 |---|---|---|---|
 | No account deletion: only unlinking a booking | §7.6, §8.6 | Blocks a Google Play release | A decision on what is deleted and what audit data is kept, then an endpoint and a web page |
-| The agent may rebook without a separate confirmation when asked for "the next available flight" (system prompt rule 2) | §8.5 | The app's Confirm screen asks first; the chat does not | Supervisor decision; changing it alters the agreed behaviour (E2E-02) |
+| ~~The agent may rebook without a separate confirmation when asked for "the next available flight" (system prompt rule 2)~~ **Closed 11 November 2026 (FR-17)** | §8.5 | The assistant now only proposes: the chat shows a "Confirm rebooking" card, and the REST tier refuses a rebooking from the agent tier without the signed, single-use token that only the passenger's tap sends | `tests/unit/test_auth.py` `TestConfirmationToken`, the FR-17 tests in `tests/unit/test_endpoints.py` and `test_agent_loop.py`, `kestrel_client/test/rebook_proposal_test.dart`. E2E-02 must be rerun with the extra tap |
 | `GEMINI_MODEL` defaults to the alias `gemini-flash-latest` in code. `.env` pins a named model | §6.3 | A deploy without the variable would run an unpinned model | Set the variable in Cloud Run (`deploy/README.md`) or change the default |
 | No system-prompt version and no model IDs in the agent turn log | §5, §6.3 | Provenance for each answer is incomplete | A version constant logged with each turn |
 | No rate limit on `POST /api/chat` and `/api/chat/stream` (sign-in is throttled) | §6.3 | Free Gemini quota can be used up by one client | A per-token limit |

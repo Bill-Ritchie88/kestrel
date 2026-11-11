@@ -144,11 +144,17 @@ class KestrelApi {
 
   /// Rebooks onto [flightId]: into [seatId] when the passenger chose one
   /// (FR-16; 409 with [ApiException.seatTaken] if it went first), otherwise
-  /// the server picks the seat.
-  Future<Map<String, dynamic>> rebook(String flightId, {String? seatId}) => _send(_http.post(
+  /// the server picks the seat. [confirmationToken]: the assistant's proposal
+  /// (FR-17), sent back by the passenger's tap on its Confirm rebooking card.
+  Future<Map<String, dynamic>> rebook(String flightId, {String? seatId, String? confirmationToken}) =>
+      _send(_http.post(
         _api('/api/reaccommodate'),
         headers: _headers,
-        body: jsonEncode({'target_flight_id': flightId, if (seatId != null) 'seat_id': seatId}),
+        body: jsonEncode({
+          'target_flight_id': flightId,
+          if (seatId != null) 'seat_id': seatId,
+          if (confirmationToken != null) 'confirmation_token': confirmationToken,
+        }),
       ));
 
   /// FR-16: the seats of the passenger's cabin on one of their alternatives.

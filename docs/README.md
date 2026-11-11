@@ -5,7 +5,7 @@ Organised by sprint. Design notes and future work apply across sprints. Database
 
 Requirements: FR-01 sign-in · FR-02 policy corpus · FR-03 alternative flights · FR-04 entitlements ·
 FR-05 hand-off and scope guard · FR-06 booking-reference authentication · FR-07 atomic rebooking with audit ·
-FR-08 passenger interface · FR-09 staff queue · FR-16 seat selection · NFR-01/02 response time and concurrency · NFR-03 data
+FR-08 passenger interface · FR-09 staff queue · FR-16 seat selection · FR-17 confirmation before the assistant rebooks · NFR-01/02 response time and concurrency · NFR-03 data
 integrity · NFR-04 retrieval accuracy.
 
 | Document | What it is | Sprint | Requirement |

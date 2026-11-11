@@ -75,11 +75,9 @@ class RestTier:
             return httpx.Response(200, json=TRIP)
         if path == "/api/flights/alternatives":
             return httpx.Response(200, json={"pnr_code": "S958PC", "count": 1, "alternatives": [FLIGHT]})
-        if path == "/api/reaccommodate":
+        if path == "/api/reaccommodate/proposal":
             return httpx.Response(200, json={
-                "success": True, "assigned_seat": "24A", "message": "ok",
-                "booking": {"cabin_class": "ECONOMY", "current_flight": {"flight_number": "KQ116"}},
-                "entitlements": {"vouchers": [], "decision": {"notes": []}},
+                "flight": FLIGHT, "seat_id": None, "confirmation_token": "p.sig", "expires_in": 300,
             })  # fmt: skip
         if path == "/api/policy/search":
             return httpx.Response(200, json={
@@ -228,15 +226,17 @@ def test_options_are_answered_from_context_in_one_model_call(rest, monkeypatch):
     assert "/api/flights/alternatives" not in rest.paths()
 
 
-def test_rebooking_still_goes_through_the_tool_and_refreshes_the_briefing(rest, monkeypatch):
+def test_a_streamed_rebooking_is_a_proposal_and_the_briefing_is_refreshed(rest, monkeypatch):
+    """FR-17: the tool streams a Confirm rebooking card; nothing is rebooked."""
     _use(monkeypatch, StreamingLLM([
         ("reaccommodate_passenger_tool", {"target_flight_id": "real-flight-id"}),
-        "Done: you're on KQ116, seat 24A.",
+        "Please confirm KQ116 on the card below.",
     ]))  # fmt: skip
     events = _stream("Book me on KQ116 please")
-    assert "/api/reaccommodate" in rest.paths()
-    assert "rebooked" in [d["type"] for k, d in events if k == "event"]
-    # The trip has changed: the next turn fetches it again.
+    assert "/api/reaccommodate/proposal" in rest.paths()
+    assert "/api/reaccommodate" not in rest.paths()
+    assert "rebook_proposal" in [d["type"] for k, d in events if k == "event"]
+    # After the passenger's tap the trip changes: the next turn fetches it again.
     client.post("/api/chat", json={"message": "x", "intent": "entitlements"}, headers=AUTH)
     assert rest.paths().count("/api/trip") == 2
 

@@ -73,11 +73,17 @@ _briefing: ContextVar[dict | None] = ContextVar("briefing", default=None)
 _speculative: ContextVar[tuple[str, Future] | None] = ContextVar("speculative", default=None)
 
 
+# Every call from this tier carries X-Agent-Key, so the REST tier knows a
+# rebooking request came from the assistant and demands the passenger's
+# confirmation token (FR-17). Sent even when unset: the REST tier fails closed.
+AGENT_KEY = os.getenv("AGENT_HISTORY_KEY", "")
+
+
 def _auth_headers() -> dict[str, str]:
     token = _session_token.get()
     if not token:
         raise RuntimeError("No authenticated session. Call authenticate() first.")
-    return {"Authorization": f"Bearer {token}"}
+    return {"Authorization": f"Bearer {token}", "X-Agent-Key": AGENT_KEY}
 
 
 def _emit(kind: str, data: dict) -> None:
@@ -204,53 +210,42 @@ def find_alternative_flights_tool() -> str:
 @tool
 def reaccommodate_passenger_tool(target_flight_id: str) -> str:
     """
-    Rebooks the authenticated passenger onto a specific recovery flight and
-    assigns a seat in their cabin. The target_flight_id MUST be copied from a
-    previous find_alternative_flights_tool result. Never guess or invent one.
+    Proposes rebooking the authenticated passenger onto a specific recovery
+    flight. It changes NOTHING: the passenger is shown a "Confirm rebooking"
+    card and only their tap rebooks them (Kestrel chooses the seat, or they
+    pick one on the seat map). The target_flight_id MUST be copied from
+    CONTEXT or a find_alternative_flights_tool result. Never guess or invent one.
     """
     try:
+        # FR-17: a proposal, never POST /api/reaccommodate. That endpoint
+        # refuses this tier without the token only the passenger's tap sends.
         response = http_client.post(
-            f"{FASTAPI_BASE_URL}/api/reaccommodate",
+            f"{FASTAPI_BASE_URL}/api/reaccommodate/proposal",
             json={"target_flight_id": target_flight_id},
             headers=_auth_headers(),
         )
         data = response.json()
         if response.status_code == 200:
-            _emit("rebooked", data)
-            booking = data.get("booking") or {}
-            current = booking.get("current_flight") or {}
-            issued = data.get("entitlements") or {}
-            # The vouchers issued with the rebooking are returned here, so the
-            # model can tell the passenger without a further get_entitlements
-            # round trip (one model call fewer per rebooking).
-            return json.dumps(
-                {
-                    "status": "SUCCESS",
-                    "seat": data["assigned_seat"],
-                    "cabin": booking.get("cabin_class"),
-                    "flight_number": current.get("flight_number"),
-                    "departs_local": current.get("departure_local"),
-                    "arrives_local": current.get("arrival_local"),
-                    "vouchers": [
-                        {
-                            k: v[k]
-                            for k in ("entitlement_type", "quantity", "amount", "currency",
-                                      "points", "status", "voucher_code")
-                            if v.get(k) is not None
-                        }
-                        for v in issued.get("vouchers") or []
-                        if v["status"] in ("ISSUED", "ELIGIBLE")
-                    ],
-                    "not_applicable": (issued.get("decision") or {}).get("notes", []),
-                }
-            )
-        _emit("error", {"action": "reaccommodate", "detail": _detail(response)})
-        if response.headers.get("X-Refusal-Reason") == "DIFFERENT_ROUTE":
-            # Migration 011: the flight is on another route. Nothing changed.
+            # The token goes to the client's card only, never to the model.
+            _emit("rebook_proposal", data)
+            flight = data.get("flight") or {}
             return json.dumps({
-                "status": "DIFFERENT_ROUTE",
-                "detail": _detail(response) + " Nothing was changed. Offer only flights from "
-                "CONTEXT or find_alternative_flights_tool.",
+                "status": "CONFIRMATION_REQUIRED",
+                "flight_number": flight.get("flight_number"),
+                "departs_local": flight.get("departure_local"),
+                "arrives_local": flight.get("arrival_local"),
+                "seat": "chosen by Kestrel unless the passenger picks one",
+                "detail": "Nothing has changed yet. Tell the passenger to check the flight and tap "
+                "Confirm rebooking on the card below your reply, or Choose a seat. Do not say "
+                "they are rebooked.",
+            })
+        _emit("error", {"action": "reaccommodate", "detail": _detail(response)})
+        if response.status_code == 404:
+            # Not an alternative (another route, invented, full). Nothing changed.
+            return json.dumps({
+                "status": "NOT_AN_OPTION",
+                "detail": _detail(response) + " Offer only flights from CONTEXT or "
+                "find_alternative_flights_tool.",
             })
         return json.dumps({"status": "FAILED", "detail": _detail(response)})
     except (httpx.HTTPError, RuntimeError, ValueError) as exc:
@@ -357,8 +352,10 @@ SYSTEM_PROMPT = (
     "2. To rebook you MUST call reaccommodate_passenger_tool with a flight_id copied verbatim "
     "from CONTEXT or from find_alternative_flights_tool. Never invent a flight ID. If the "
     "passenger has not chosen a flight, describe the options (flight number, departure, "
-    "arrival, seats left) and ask which one they want, unless they asked for the next "
-    "available flight.\n"
+    "arrival, seats left) and ask which one they want; if they asked for the next available "
+    "flight, propose the earliest-arriving one. The tool never rebooks: it shows the passenger "
+    "a Confirm rebooking card and only their tap changes the booking, so never say they are "
+    "rebooked until CONTEXT shows the new flight.\n"
     "3. For questions about rights, refunds, compensation, care or rules you MUST call "
     "search_policy_tool and answer ONLY from the clauses it returns, citing each clause "
     "reference you rely on in square brackets, e.g. [EU261 Art. 9]. If it returns "
@@ -366,9 +363,7 @@ SYSTEM_PROMPT = (
     "notified and will follow up.\n"
     "4. What this passenger receives may be answered from the entitlements in CONTEXT, "
     "reporting only the items and amounts given there and why anything does not apply; call "
-    "get_entitlements_tool if CONTEXT has none or the booking has changed since. A "
-    "successful rebooking already returns the vouchers issued with it: report those and do "
-    "not call get_entitlements_tool again.\n"
+    "get_entitlements_tool if CONTEXT has none or the booking has changed since.\n"
     "5. If the passenger asks for a person, call escalate_to_human_tool.\n"
     "Quote times from the *_local fields or as CONTEXT gives them: they are local time at "
     "that airport. Be brief, warm and concrete. Write plain text: no Markdown, no ** or "
@@ -378,7 +373,7 @@ SYSTEM_PROMPT = (
 # What the passenger sees while a tool runs (streamed replies).
 TOOL_STATUS = {
     "find_alternative_flights_tool": "Checking flights\u2026",
-    "reaccommodate_passenger_tool": "Rebooking you\u2026",
+    "reaccommodate_passenger_tool": "Preparing your rebooking\u2026",
     "search_policy_tool": "Reading the conditions of carriage\u2026",
     "get_entitlements_tool": "Checking what you\u2019re entitled to\u2026",
     "escalate_to_human_tool": "Passing your case to a person\u2026",
@@ -758,6 +753,7 @@ def _context_cards(user_query: str, reply: str) -> None:
     if (
         "alternatives" not in kinds
         and "rebooked" not in kinds
+        and "rebook_proposal" not in kinds
         and alternatives
         and any(w in question for w in _OPTION_WORDS)
         and any(

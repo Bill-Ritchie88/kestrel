@@ -700,3 +700,105 @@ async def test_open_case_locks_the_booking_before_it_looks():
     await open_case(conn, pnr_code="S958PC", trigger="FRUSTRATION", actor="AGENT_AI", summary="s")
     first_sql = conn.calls[0][0]
     assert "FOR UPDATE" in first_sql and "pnr_bookings" in first_sql
+
+
+# -- FR-17 confirmation before the assistant rebooks ---------------------------
+
+AGENT = {"X-Agent-Key": "anything"}  # every call from the agent tier carries it
+OK_PROC = {"success": True, "assigned_seat_number": "5A", "message": "ok"}
+
+
+@pytest.fixture
+def proposal(client, conn, token):
+    """A proposal for FLIGHT_ID with Kestrel choosing the seat."""
+    auth._used_confirmations.clear()
+    conn.routes["WITH bk AS"] = [{**ALTERNATIVE, "flight_id": FLIGHT_ID}]
+    r = client.post("/api/reaccommodate/proposal", json={"target_flight_id": FLIGHT_ID}, headers=token)
+    assert r.status_code == 200
+    return r.json()
+
+
+def test_a_proposal_changes_nothing_and_carries_a_five_minute_token(proposal, conn):
+    assert proposal["flight"]["flight_id"] == FLIGHT_ID
+    assert proposal["seat_id"] is None and proposal["expires_in"] == 300
+    assert proposal["confirmation_token"]
+    assert not conn.called("reaccommodate_passenger_atomic")
+
+
+def test_no_proposal_for_a_flight_that_is_not_an_alternative(client, conn, token):
+    conn.routes["WITH bk AS"] = [ALTERNATIVE]  # f-alt only
+    r = client.post("/api/reaccommodate/proposal", json={"target_flight_id": FLIGHT_ID}, headers=token)
+    assert r.status_code == 404 and "Nothing was changed" in r.json()["detail"]
+
+
+def test_the_agent_tier_cannot_rebook_without_a_token(client, conn, token):
+    conn.routes["reaccommodate_passenger_atomic"] = OK_PROC
+    r = client.post("/api/reaccommodate", json={"target_flight_id": FLIGHT_ID}, headers={**token, **AGENT})
+    assert r.status_code == 403
+    assert r.headers["X-Refusal-Reason"] == "CONFIRMATION_REQUIRED"
+    assert "confirm" in r.json()["detail"]
+    assert not conn.called("reaccommodate_passenger_atomic")
+
+
+def test_the_agent_tier_is_refused_even_with_an_empty_key(client, conn, token):
+    """Fails closed: an unset AGENT_HISTORY_KEY still marks the call."""
+    r = client.post("/api/reaccommodate", json={"target_flight_id": FLIGHT_ID},
+                    headers={**token, "X-Agent-Key": ""})
+    assert r.status_code == 403
+
+
+def test_the_passengers_tap_with_the_token_rebooks_once(client, conn, token, proposal):
+    conn.routes["reaccommodate_passenger_atomic"] = OK_PROC
+    body = {"target_flight_id": FLIGHT_ID, "confirmation_token": proposal["confirmation_token"]}
+    r = client.post("/api/reaccommodate", json=body, headers=token)
+    assert r.status_code == 200 and r.json()["assigned_seat"] == "5A"
+    again = client.post("/api/reaccommodate", json=body, headers=token)
+    assert again.status_code == 403 and "already been used" in again.json()["detail"]
+    assert len(conn.called("reaccommodate_passenger_atomic")) == 1
+
+
+def test_a_valid_token_also_lets_the_agent_tier_through(client, conn, token, proposal):
+    conn.routes["reaccommodate_passenger_atomic"] = OK_PROC
+    body = {"target_flight_id": FLIGHT_ID, "confirmation_token": proposal["confirmation_token"]}
+    assert client.post("/api/reaccommodate", json=body, headers={**token, **AGENT}).status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [
+        ({"target_flight_id": "c2eebc99-9c0b-4ef8-bb6d-6bb9bd380a33"}, "another flight"),
+        ({"seat_id": SEAT_ID}, "another seat"),
+        ({"confirmation_token": "forged.token"}, "Invalid"),
+    ],
+)
+def test_a_token_rebooks_only_the_proposed_flight_and_seat(client, conn, token, proposal, change, reason):
+    conn.routes["reaccommodate_passenger_atomic"] = OK_PROC
+    body = {"target_flight_id": FLIGHT_ID, "confirmation_token": proposal["confirmation_token"], **change}
+    r = client.post("/api/reaccommodate", json=body, headers=token)
+    assert r.status_code == 403 and reason in r.json()["detail"]
+    assert r.headers["X-Refusal-Reason"] == "CONFIRMATION_INVALID"
+    assert not conn.called("reaccommodate_passenger_atomic")
+
+
+def test_a_token_is_refused_for_another_booking(client, conn, proposal):
+    other, _ = issue_token(pnr_code="OTHER1", passenger_id="p-2", last_name="Other", rewards_tier=None)
+    body = {"target_flight_id": FLIGHT_ID, "confirmation_token": proposal["confirmation_token"]}
+    r = client.post("/api/reaccommodate", json=body, headers={"Authorization": f"Bearer {other}"})
+    assert r.status_code == 403 and "another booking" in r.json()["detail"]
+
+
+def test_an_expired_token_is_refused(client, conn, token, proposal, monkeypatch):
+    real_time = auth.time.time
+    monkeypatch.setattr(auth.time, "time", lambda: real_time() + auth.CONFIRMATION_TTL_SECONDS + 1)
+    body = {"target_flight_id": FLIGHT_ID, "confirmation_token": proposal["confirmation_token"]}
+    # A fresh session token, so only the confirmation has expired.
+    fresh, _ = issue_token(pnr_code="S958PC", passenger_id="p-1", last_name="Whitehead", rewards_tier="GOLD")
+    r = client.post("/api/reaccommodate", json=body, headers={"Authorization": f"Bearer {fresh}"})
+    assert r.status_code == 403 and "expired" in r.json()["detail"]
+
+
+def test_the_apps_own_confirm_page_needs_no_token(client, conn, token):
+    """A person's tap on Confirm (no X-Agent-Key) keeps working as before."""
+    conn.routes["reaccommodate_passenger_atomic"] = OK_PROC
+    r = client.post("/api/reaccommodate", json={"target_flight_id": FLIGHT_ID}, headers=token)
+    assert r.status_code == 200

@@ -20,8 +20,10 @@ Endpoint map (Sprint 2):
     DELETE /api/chat/history             "Start over"
     GET  /api/flights/alternatives       FR-03  same route, same cabin, seats left
     GET  /api/flights/{flight_id}/seats  FR-16  seat map of the passenger's cabin on an alternative
+    POST /api/reaccommodate/proposal     FR-17  a signed 5-minute confirmation token for one rebooking
     POST /api/reaccommodate              FR-03, FR-07, FR-16  atomic rebooking (optional seat_id)
-                                         + entitlements; a chosen seat taken first is 409 SEAT_TAKEN
+                                         + entitlements; a chosen seat taken first is 409 SEAT_TAKEN;
+                                         from the agent tier only with a confirmation_token (FR-17)
     GET  /api/policy/search              FR-02, FR-05  grounded clauses or a hand-off
     GET  /api/entitlements               FR-04  what the rules say, with reasons
     GET  /api/vouchers                   FR-04  issued vouchers
@@ -52,8 +54,11 @@ from kestrel.api.auth import (
     clear_attempts,
     current_passenger,
     is_throttled,
+    issue_confirmation,
     issue_token,
     register_failed_attempt,
+    spend_confirmation,
+    verify_confirmation,
 )
 from kestrel.api.booking import (
     SQL_LOAD_BOOKING,
@@ -320,6 +325,14 @@ class ReaccommodateRequest(BaseModel):
 
     target_flight_id: str = Field(..., examples=["c2eebc99-9c0b-4ef8-bb6d-6bb9bd380a33"])
     # FR-16: the seat the passenger chose; absent, the procedure picks one.
+    seat_id: uuid.UUID | None = None
+    # FR-17: from POST /api/reaccommodate/proposal, sent back by the passenger's
+    # tap on "Confirm rebooking". Required when the agent tier calls.
+    confirmation_token: str | None = Field(default=None, max_length=512)
+
+
+class ProposalRequest(BaseModel):
+    target_flight_id: str = Field(..., max_length=64)
     seat_id: uuid.UUID | None = None
 
 
@@ -683,17 +696,76 @@ async def trip(
     }
 
 
+@app.post("/api/reaccommodate/proposal")
+async def propose_rebooking(
+    payload: ProposalRequest,
+    session: PassengerSession = Depends(current_passenger),
+    pool: asyncpg.Pool = Depends(db.get_pool),
+):
+    """
+    FR-17. What the assistant offers instead of rebooking: the flight (one of
+    the booking's alternatives, else 404) and a signed confirmation token
+    bound to this booking, this flight and this seat choice, valid for five
+    minutes and once. Nothing is changed.
+    """
+    # 50: every alternative, not just the top five the trip shows.
+    rows = await _fetch(pool, SQL_FIND_ALTERNATIVES, session.pnr_code, 50)
+    row = next((r for r in rows if r["flight_id"] == payload.target_flight_id.lower()), None)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="That flight is not one your booking can move to. Nothing was changed.",
+        )
+    seat_id = str(payload.seat_id) if payload.seat_id else None
+    token, ttl = issue_confirmation(pnr_code=session.pnr_code, flight_id=row["flight_id"], seat_id=seat_id)
+    return {
+        "flight": alternative_to_dict(row),
+        "seat_id": seat_id,
+        "confirmation_token": token,
+        "expires_in": ttl,
+    }
+
+
 @app.post("/api/reaccommodate")
 async def reaccommodate_passenger(
     payload: ReaccommodateRequest,
     session: PassengerSession = Depends(current_passenger),
     pool: asyncpg.Pool = Depends(db.get_pool),
+    x_agent_key: str | None = Header(default=None),
 ):
     """
     FR-03. Delegates the state change to the atomic stored procedure, then
     applies the entitlement rules to the new itinerary (FR-04), so a passenger
     who has just been rebooked can see their vouchers straight away.
+
+    FR-17: the agent tier marks every call with X-Agent-Key (any value counts,
+    so a misconfigured key fails closed). Such a call rebooks only with a
+    confirmation_token, which only the passenger's tap sends. A token, when
+    sent by anyone, must match this booking, flight and seat, unexpired and
+    unused. The app's own Confirm page (a person's tap) needs none.
     """
+    jti = None
+    if payload.confirmation_token is not None:
+        try:
+            jti = verify_confirmation(
+                payload.confirmation_token,
+                pnr_code=session.pnr_code,
+                flight_id=payload.target_flight_id,
+                seat_id=str(payload.seat_id) if payload.seat_id else None,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=str(exc),
+                headers={"X-Refusal-Reason": "CONFIRMATION_INVALID"},
+            ) from exc
+    elif x_agent_key is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The assistant cannot rebook on its own: the passenger must confirm the "
+            "proposal first. Nothing was changed.",
+            headers={"X-Refusal-Reason": "CONFIRMATION_REQUIRED"},
+        )
     async with pool.acquire() as conn:
         try:
             result = await conn.fetchrow(
@@ -728,6 +800,8 @@ async def reaccommodate_passenger(
                 detail=result["message"],
                 headers={"X-Refusal-Reason": reason} if reason else None,
             )
+        if jti is not None:
+            spend_confirmation(jti)
 
         # The rebooking has already committed; entitlements are a separate
         # transaction. If issuing them fails, the passenger is still rebooked
