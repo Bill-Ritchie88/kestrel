@@ -178,3 +178,16 @@ def test_agent_chat_is_limited_per_token(now, monkeypatch):
     assert r.status_code == 429 and r.headers["Retry-After"] == "3"
     other = client.post("/api/chat/stream", json={"message": "hi"}, headers={"Authorization": "Bearer agent-rl-2"})
     assert other.status_code == 401
+
+
+# -- deployment ---------------------------------------------------------------
+
+
+def test_dockerfile_pins_one_uvicorn_worker_per_service():
+    """The buckets are per process, so WEB_CONCURRENCY must not start more workers."""
+    from pathlib import Path
+
+    cmd = next(line for line in (Path(__file__).parents[2] / "deploy" / "Dockerfile").read_text().splitlines() if line.startswith("CMD"))
+    commands = cmd.split("exec ")[1:]
+    assert len(commands) == 2
+    assert all("uvicorn" in c and "--workers 1" in c for c in commands)

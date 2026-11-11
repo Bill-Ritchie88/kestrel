@@ -53,9 +53,11 @@ turns stop working whenever a service restarts.
 minute per client IP, in bursts of up to 10. Over the limit the answer is 429 with `Retry-After` in seconds,
 which CORS exposes to the browser. Two caveats for this deployment:
 
-- The buckets live in each process's memory, so keep **one instance and one worker** per service (the free
-  tier does). More instances or workers each keep their own buckets and multiply the limit; move to a shared
-  store such as Redis first (the `BucketStore` protocol is the seam).
+- The buckets live in each process's memory. **Rule: one instance and one worker per service, and no
+  autoscaling, until the limiter moves to Redis.** The Dockerfile pins `--workers 1` on both uvicorn commands,
+  so a platform `WEB_CONCURRENCY` cannot add workers; the instance count and autoscaling are set in the Render
+  dashboard (1 instance, autoscaling off). More instances or workers each keep their own buckets and multiply
+  the limit; move to a shared store such as Redis first (the `BucketStore` protocol is the seam).
 - The client IP is the **first** address in `X-Forwarded-For`, which Render's proxy sets. A client can write
   that header itself, so a caller who changes it on every request escapes the per-IP sign-in limit (the
   per-booking sign-in throttle in `auth.py` and the per-token chat limit still apply).

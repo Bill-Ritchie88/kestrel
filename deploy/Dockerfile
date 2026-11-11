@@ -35,5 +35,6 @@ USER kestrel
 
 EXPOSE 8080
 
+# --workers 1: the rate limiter keeps its buckets in memory per process, so WEB_CONCURRENCY must not add workers.
 # exec: uvicorn becomes PID 1 and receives the platform's stop signal.
-CMD ["sh", "-c", "if [ \"$SERVICE\" = agent ]; then exec uvicorn kestrel.agent_service:app --host 0.0.0.0 --port \"$PORT\" --proxy-headers; else exec uvicorn kestrel.api.main:app --host 0.0.0.0 --port \"$PORT\" --proxy-headers; fi"]
+CMD ["sh", "-c", "if [ \"$SERVICE\" = agent ]; then exec uvicorn kestrel.agent_service:app --host 0.0.0.0 --port \"$PORT\" --proxy-headers --workers 1; else exec uvicorn kestrel.api.main:app --host 0.0.0.0 --port \"$PORT\" --proxy-headers --workers 1; fi"]
