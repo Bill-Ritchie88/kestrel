@@ -138,7 +138,7 @@ SQL_AUDIT_UNLINK = """
 
 # "Delete my account data" (DR-01): the conversation of every booking of the
 # passenger the account was linked to. Bookings and audit_logs are kept
-# (docs/sprint-3/03-account-deletion.md).
+# (docs/sprint-3/04-account-deletion.md).
 SQL_DELETE_CHAT_FOR_PASSENGER = """
     DELETE FROM chat_messages
     WHERE pnr_code IN (SELECT pnr_code FROM pnr_bookings WHERE passenger_id = $1::uuid);

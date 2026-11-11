@@ -39,7 +39,7 @@ listens on it.
 | `STAFF_API_KEY` | ✓ | – | yes |
 | `AGENT_HISTORY_KEY` | ✓ | ✓ — **the same value in both** | yes |
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY` | ✓ | – | public, keep with the others |
-| `SUPABASE_SERVICE_ROLE_KEY` (optional) | ✓ — lets "Delete my account data" remove the Supabase sign-in; unset, it is removed by hand ([account deletion](../docs/sprint-3/03-account-deletion.md)) | – | **yes — full admin access, REST tier only** |
+| `SUPABASE_SERVICE_ROLE_KEY` (optional) | ✓ — lets "Delete my account data" remove the Supabase sign-in; unset, it is removed by hand ([account deletion](../docs/sprint-3/04-account-deletion.md)) | – | **yes — full admin access, REST tier only** |
 | `ALLOWED_ORIGINS` | the site's address | the site's address | no |
 | `FASTAPI_BASE_URL` | – | the REST tier's Render address | no |
 

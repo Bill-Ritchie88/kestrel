@@ -374,7 +374,7 @@ SYSTEM_PROMPT = (
 # Provenance (migration 014): every assistant turn is saved with the version of
 # the prompt that produced it. Bump PROMPT_SEMVER when the rules change on
 # purpose; the hash changes by itself with any edit to the text.
-PROMPT_SEMVER = "2.0.0"
+PROMPT_SEMVER = "2.1.0"  # 2.1.0: rule 2, the assistant proposes and the passenger confirms (FR-17)
 
 
 def prompt_version(text: str, semver: str = PROMPT_SEMVER) -> str:

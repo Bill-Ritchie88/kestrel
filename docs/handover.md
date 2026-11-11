@@ -169,7 +169,7 @@ At 50 concurrent rebookings the time goes to queueing for the REST tier's pool o
 
 1. A usability test with 3–5 users is still to be done. The kit (script, sheets, SUS, scoring, test-day bookings) is in `docs/sprint-3/usability/`.
 2. NFR-01 is met on Render up to 25 concurrent rebookings, not at 50 (see section 7).
-3. There is no account deletion yet. The chat endpoints are not rate limited.
+3. Closed (DR-01, NFR-05): "Delete my account data" removes the account link and chat history and keeps bookings and audit logs; until `SUPABASE_SERVICE_ROLE_KEY` is set on the REST tier, the Supabase Auth user is removed by hand (`docs/sprint-3/04-account-deletion.md`). Chat and sign-in are rate limited per token and per IP, in memory per process, so each service must keep one instance and one worker.
 4. Closed (FR-17): the assistant only proposes a rebooking; the passenger confirms it on a card in the chat, and the REST tier refuses the agent tier without that confirmation's token. Used tokens are remembered per process, so with several REST replicas a replay is stopped only by the procedure refusing a second rebooking.
 5. KCAA consumer protection rules are not yet in the policy corpus.
 6. The entitlement amounts are project assumptions pending Kenya Airways confirmation.
