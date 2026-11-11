@@ -83,11 +83,11 @@ See `diagrams/architecture.png`, `diagrams/deployment.png`, `diagrams/erd.png` a
 |---|---|
 | `src/kestrel/` | Python back end: `api/` (REST tier), `agent/` and `agent_service.py` (assistant), `entitlements.py` |
 | `kestrel_client/` | Kestrel Web (Flutter) |
-| `db/migrations/000–014` | Database schema, procedure, row-level security, policy retrieval, accounts, chat memory, same-route rule, seat selection, prompt version per assistant turn (014: **apply before deploying** the API that writes it) |
+| `db/migrations/000–014` | Database schema, procedure, row-level security, policy retrieval, accounts, chat memory, same-route rule, seat selection, prompt version per assistant turn (014, applied to live 11 November 2026) |
 | `scripts/data/` | Dataset generator, demo reset, policy ingestion, schema export |
 | `scripts/evaluation/` | Retrieval evaluation, load test, latency, smoke test |
 | `scripts/ci/` | Secret scan, Flutter annotations |
-| `tests/` | 344 Python tests (unit and integration); 80 Flutter tests in `kestrel_client/test/` |
+| `tests/` | 394 Python tests (unit and integration); 93 Flutter tests in `kestrel_client/test/` |
 | `deploy/` | Dockerfile (`SERVICE=api` or `agent`) and the hosting guide |
 | `docs/` | Sprint records (`sprint-1/`, `sprint-2/`, `sprint-3/`), design, future work, traceability |
 
