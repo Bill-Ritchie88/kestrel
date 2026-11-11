@@ -129,19 +129,18 @@ The "where it is" notes are for you only. Never read them out.
 - **Note:** the time to the first word of the answer (Render may be slow), whether they notice the sources, and
   what they say about trusting the answer.
 
-### Task 4: Rebook and choose a seat (limit 4 min) · FR-03, FR-07
+### Task 4: Rebook and choose a seat (limit 4 min) · FR-03, FR-07, FR-16
 
-> "Move yourself to the first flight you can get that still has seats, and make sure you have a seat on it."
+> "Move yourself to the first flight you can get that still has seats, and pick a window seat on it."
 
-- **Success:** the confirmation shows they are rebooked. It shows the new flight and a seat number, and they
-  can tell you the seat number.
-- **Two versions of the seat step.** A seat map is being built on another branch. Either version counts as Y
-  if the confirmation shows a seat:
-  - **Seat map shown:** they pick a seat, or choose "Let Kestrel choose".
-  - **No seat map** (only "Let Kestrel choose", or a note that a seat will be held): the seat is assigned
-    when they confirm. They must still find and say the seat number.
+- **Success:** they choose a window seat (A, or the last letter of the row) on the seat map, confirm, and the
+  confirmation shows the new flight and that seat. They can tell you the seat number.
+- **Partial:** they rebook with "Let Kestrel choose" instead of picking a seat. Record N for success and note
+  "auto seat", and in the debrief ask whether they saw the seat map.
+- **If two participants pick the same seat at once,** the second sees "That seat was just taken. Please pick
+  another" and the map reloads. That is the system working; let them pick again and note it.
 - **Where it is:** flights are listed on the trip page, on Flights and in the Assistant, earliest arrival first.
-  The first one is marked as recommended. Confirming takes one more screen.
+  The first one is marked as recommended. Choosing a flight opens the seat map, then the Confirm screen.
 - **Note:** whether they chose the first flight listed (write "not first" if not), any hesitation on the
   confirm screen, and whether "no charge for this change" reassures them.
 - If they do not finish, rebook them yourself before task 5 (section 2).
