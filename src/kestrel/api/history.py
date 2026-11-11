@@ -25,9 +25,9 @@ SQL_HISTORY = """
 """
 
 SQL_APPEND = """
-    INSERT INTO chat_messages (pnr_code, role, content)
-    VALUES ($1, $2, $3)
-    RETURNING role, content, created_at;
+    INSERT INTO chat_messages (pnr_code, role, content, prompt_version)
+    VALUES ($1, $2, $3, $4)
+    RETURNING role, content, created_at, prompt_version;
 """
 
 SQL_CLEAR = "DELETE FROM chat_messages WHERE pnr_code = $1;"
@@ -38,4 +38,6 @@ def turn_to_dict(row) -> dict:
         "role": row["role"],
         "content": row["content"],
         "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        # NULL for user turns and turns saved before migration 014.
+        "prompt_version": row.get("prompt_version"),
     }

@@ -343,6 +343,8 @@ class HandoffRequest(BaseModel):
 class ChatTurnRequest(BaseModel):
     role: Literal["user", "assistant"]
     content: str = Field(..., min_length=1, max_length=history.MAX_CONTENT)
+    # Migration 014: the system-prompt version behind an assistant turn.
+    prompt_version: str | None = Field(default=None, max_length=64)
 
 
 class ResolveRequest(BaseModel):
@@ -908,7 +910,14 @@ async def append_chat_turn(
             detail="Only the assistant service can save the assistant's turns.",
         )
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(history.SQL_APPEND, session.pnr_code, payload.role, payload.content)
+        row = await conn.fetchrow(
+            history.SQL_APPEND,
+            session.pnr_code,
+            payload.role,
+            payload.content,
+            # Only the agent service (checked above) writes assistant turns.
+            payload.prompt_version if payload.role == "assistant" else None,
+        )
     return history.turn_to_dict(row)
 
 

@@ -204,7 +204,8 @@ def test_both_turns_are_saved_after_the_reply(rest, monkeypatch):
     saved = [json.loads(r.content) for r in rest.requests if r.url.path == "/api/chat/history"]
     assert saved == [
         {"role": "user", "content": "Hello there"},
-        {"role": "assistant", "content": "Here is what I can do."},
+        # Migration 014: the assistant's turn carries the prompt version.
+        {"role": "assistant", "content": "Here is what I can do.", "prompt_version": agent.PROMPT_VERSION},
     ]
     assert all(r.headers["Authorization"] == f"Bearer {TOKEN}" for r in rest.requests)
     # Issue #12 (assistant turns) and NFR-05 (neither turn counts twice).

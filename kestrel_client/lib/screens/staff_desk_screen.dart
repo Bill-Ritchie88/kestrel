@@ -766,6 +766,8 @@ class _CaseDetailState extends State<_CaseDetail> {
           if (c.bookingStatus != null) _Field('Booking status', titleCase(c.bookingStatus!)),
           _Field('Opened', since(c.createdAt)),
           if (c.topSimilarity != null) _Field('Best match', c.topSimilarity!.toStringAsFixed(2)),
+          // Which rules the assistant ran on (migration 014).
+          _Field('Assistant prompt', c.promptVersion ?? 'Not recorded'),
         ]),
         if ((c.question ?? '').isNotEmpty) ...[
           const SizedBox(height: K.s4),

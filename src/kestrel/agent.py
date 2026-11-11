@@ -17,6 +17,7 @@ injected, so the tool loop is unit-tested with a scripted model
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -375,6 +376,20 @@ SYSTEM_PROMPT = (
     "other formatting marks."
 )
 
+# Provenance (migration 014): every assistant turn is saved with the version of
+# the prompt that produced it. Bump PROMPT_SEMVER when the rules change on
+# purpose; the hash changes by itself with any edit to the text.
+PROMPT_SEMVER = "2.0.0"
+
+
+def prompt_version(text: str, semver: str = PROMPT_SEMVER) -> str:
+    """'2.0.0+3fa9c2d1': the semantic version and the first 8 hex digits of
+    the prompt's SHA-256."""
+    return f"{semver}+{hashlib.sha256(text.encode('utf-8')).hexdigest()[:8]}"
+
+
+PROMPT_VERSION = prompt_version(SYSTEM_PROMPT)
+
 # What the passenger sees while a tool runs (streamed replies).
 TOOL_STATUS = {
     "find_alternative_flights_tool": "Checking flights\u2026",
@@ -612,6 +627,7 @@ class AgentResult:
             "steps": self.steps,
             "stopped_at_limit": self.stopped_at_limit,
             "model": GEMINI_MODEL,
+            "prompt_version": PROMPT_VERSION,
             "thinking_level": GEMINI_THINKING_LEVEL,
             "timing": self.timing(),
         }
