@@ -25,7 +25,7 @@ the supervisor, an account, money or real participants, so code alone cannot clo
 
 | Gap | Plan section | Effect | Needs |
 |---|---|---|---|
-| No account deletion: only unlinking a booking | §7.6, §8.6 | Blocks a Google Play release | A decision on what is deleted and what audit data is kept, then an endpoint and a web page |
+| ~~No account deletion: only unlinking a booking~~ **Closed (11 Nov 2026)** | §7.6, §8.6 | Account menu: "Unlink this booking" and "Delete my account data", each confirmed first. Deletion removes the link, the chat history and (with a service-role key) the Supabase sign-in; bookings and audit kept (DR-01) | Done: [Account deletion](03-account-deletion.md); `tests/unit/test_accounts.py`; `widget_test.dart`. *Owner*: no `SUPABASE_SERVICE_ROLE_KEY`, so remove the Supabase user by hand, or set the key on Render |
 | The agent may rebook without a separate confirmation when asked for "the next available flight" (system prompt rule 2) | §8.5 | The app's Confirm screen asks first; the chat does not | Supervisor decision; changing it alters the agreed behaviour (E2E-02) |
 | `GEMINI_MODEL` defaults to the alias `gemini-flash-latest` in code. `.env` pins a named model | §6.3 | A deploy without the variable would run an unpinned model | Set the variable in Cloud Run (`deploy/README.md`) or change the default |
 | No system-prompt version and no model IDs in the agent turn log | §5, §6.3 | Provenance for each answer is incomplete | A version constant logged with each turn |

@@ -352,3 +352,95 @@ def test_one_http_client_serves_every_sign_in(client, conn, supabase):
     post(client)
     assert accounts._http() is first
     assert len(supabase.requests) == 2
+
+
+# -- DR-01: "Delete my account data" ---------------------------------------------
+
+DELETE_CHAT = "DELETE FROM chat_messages"
+OTHER_PASSENGER = "99999999-8888-7777-6666-555555555555"
+
+
+def delete_data(client, token=GOOD_TOKEN, **extra):
+    return client.request("DELETE", "/api/auth/account", json={"access_token": token, **extra})
+
+
+@pytest.fixture
+def linked(conn):
+    # Before LINKED, which also matches "FROM passenger_accounts".
+    conn.routes = {
+        DELETE_LINK: {"passenger_id": BOOKING["passenger_id"]},
+        DELETE_CHAT: "DELETE 4",
+        **conn.routes,
+    }
+    return conn
+
+
+def test_delete_removes_link_and_chat_history_keeps_bookings_and_audit(client, linked, supabase, monkeypatch):
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    # A passenger or booking named in the body is ignored: identity is the token's.
+    r = delete_data(client, passenger_id=OTHER_PASSENGER, pnr_code="Z9PKW3")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["unlinked"] is True
+    assert body["chat_messages_deleted"] == 4
+    # No service-role key: the response says the identity is removed by hand.
+    assert body["sign_in_identity_deleted"] is False
+    assert "removed manually" in body["manual_step"]
+    assert linked.called(DELETE_LINK) == [(USER_ID,)]
+    assert linked.called(DELETE_CHAT) == [(BOOKING["passenger_id"],)]  # never OTHER_PASSENGER
+    (audit,) = linked.called("ACCOUNT_DATA_DELETED")
+    assert audit[0] == f"ACCOUNT:google:{USER_ID}"
+    assert json.loads(audit[1]) == {"passenger_id": BOOKING["passenger_id"], "chat_messages_deleted": 4}
+    # Bookings and the audit trail are kept: the link and the chat are the
+    # only rows deleted, and the audit trail only grows.
+    statements = [sql.lstrip() for sql, _ in linked.calls]
+    assert all(
+        s.startswith(("DELETE FROM passenger_accounts", "DELETE FROM chat_messages", "INSERT INTO audit_logs"))
+        for s in statements
+    )
+    # Only the chat of this passenger's own bookings.
+    assert "WHERE passenger_id = $1::uuid" in accounts.SQL_DELETE_CHAT_FOR_PASSENGER
+
+
+def test_delete_removes_the_supabase_identity_when_a_service_key_is_set(client, linked, supabase, monkeypatch):
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-key-for-tests")
+    admin = []
+    verify = accounts._transport
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "DELETE":
+            admin.append(request)
+            return httpx.Response(200, json={})
+        return verify.handler(request)
+
+    monkeypatch.setattr(accounts, "_transport", httpx.MockTransport(handler))
+    body = delete_data(client).json()
+    assert body["sign_in_identity_deleted"] is True
+    assert body["manual_step"] is None
+    (req,) = admin
+    assert req.url.path == f"/auth/v1/admin/users/{USER_ID}"
+    assert req.headers["authorization"] == "Bearer service-key-for-tests"
+
+
+def test_a_refused_identity_deletion_falls_back_to_the_manual_step(client, linked, supabase, monkeypatch):
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "wrong-key")
+    verify = accounts._transport
+    monkeypatch.setattr(accounts, "_transport", httpx.MockTransport(
+        lambda r: httpx.Response(403, json={}) if r.method == "DELETE" else verify.handler(r)))
+    body = delete_data(client).json()
+    assert body["unlinked"] is True and body["sign_in_identity_deleted"] is False
+    assert body["manual_step"]
+
+
+def test_delete_without_a_link_deletes_no_chat_history(client, conn, supabase, monkeypatch):
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    conn.routes[DELETE_LINK] = None
+    body = delete_data(client).json()
+    assert body["unlinked"] is False and body["chat_messages_deleted"] == 0
+    assert conn.called(DELETE_CHAT) == [] and conn.called("ACCOUNT_DATA_DELETED") == []
+
+
+def test_delete_needs_a_valid_account_token(client, conn, supabase):
+    assert delete_data(client, BAD_TOKEN).status_code == 401
+    assert client.request("DELETE", "/api/auth/account").status_code == 422  # no token at all
+    assert conn.calls == []
