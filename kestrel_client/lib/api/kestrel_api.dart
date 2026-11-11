@@ -82,9 +82,18 @@ class KestrelApi {
     final detail = body['detail'];
     throw ApiException(
       res.statusCode,
-      detail is String ? detail : _fallback(res.statusCode),
+      slowDown(res.statusCode, res.headers) ?? (detail is String ? detail : _fallback(res.statusCode)),
       reason: res.headers['x-refusal-reason'],
     );
+  }
+
+  /// NFR-05: a 429 from the rate limit carries Retry-After (seconds); the
+  /// sign-in throttle's 429 does not, and keeps its own words.
+  static String? slowDown(int status, Map<String, String> headers) {
+    final seconds = int.tryParse(headers['retry-after'] ?? '');
+    if (status != 429 || seconds == null) return null;
+    final unit = seconds == 1 ? 'second' : 'seconds';
+    return "You're sending messages quickly. Please wait $seconds $unit and try again.";
   }
 
   static String _fallback(int status) => switch (status) {
@@ -252,7 +261,8 @@ class KestrelApi {
         } on FormatException {
           detail = null;
         }
-        throw ApiException(res.statusCode, detail is String ? detail : _fallback(res.statusCode));
+        throw ApiException(res.statusCode,
+            slowDown(res.statusCode, res.headers) ?? (detail is String ? detail : _fallback(res.statusCode)));
       }
       String? kind;
       final data = StringBuffer();

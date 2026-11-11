@@ -47,6 +47,18 @@ Type the values into Render's dashboard. Never put them in a file in the reposit
 `[Convert]::ToBase64String((1..32 | % { Get-Random -Max 256 }))`), otherwise tokens and saved assistant
 turns stop working whenever a service restarts.
 
+**Rate limits (NFR-05, `src/kestrel/ratelimit.py`).** Chat routes (`/api/chat*` on both services) allow
+20 requests a minute per bearer token, in bursts of up to 5; sign-in routes (`/api/auth/*`) allow 20 a
+minute per client IP, in bursts of up to 10. Over the limit the answer is 429 with `Retry-After` in seconds,
+which CORS exposes to the browser. Two caveats for this deployment:
+
+- The buckets live in each process's memory, so keep **one instance and one worker** per service (the free
+  tier does). More instances or workers each keep their own buckets and multiply the limit; move to a shared
+  store such as Redis first (the `BucketStore` protocol is the seam).
+- The client IP is the **first** address in `X-Forwarded-For`, which Render's proxy sets. A client can write
+  that header itself, so a caller who changes it on every request escapes the per-IP sign-in limit (the
+  per-booking sign-in throttle in `auth.py` and the per-token chat limit still apply).
+
 ---
 
 ## 1. The REST tier on Render
