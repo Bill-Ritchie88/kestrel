@@ -28,7 +28,7 @@ This is a research prototype. It is not an official Kenya Airways service, and a
 
 - Flight KQ606, Nairobi to Mombasa, 11:45 on 30 November, is cancelled with a technical problem.
 - It has 8 disrupted economy bookings: KX4T7P Wanjiru, KW8R2M Otieno, KR6N3D Akinyi, KM9V5H Mwangi, KJ2P8W Chebet, KF7L4B Kiprop, KH3Q9T Njeri and KD5Z6R Kamau. None is rebooked yet.
-- Each has other Nairobi–Mombasa flights to choose from (KQ604, KQ608, KQ610, KQ612, KQ614 on the days before).
+- Later the same day: KQ608, KQ610, KQ612 and KQ614. The Kestrel Recommends card shows the earliest same-route flight, which is now on an earlier day (KQ600 on 11 November), because KQ606 sits on the last day of the schedule.
 - `.\tasks.ps1 reset` re-anchors the whole schedule and cancels the three busiest flights instead, so it does **not** recreate this KQ606 set-up. Use it only after the presentation.
 - The staff desk is signed into with the shared staff key (`STAFF_API_KEY`).
 
