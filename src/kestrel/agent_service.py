@@ -185,6 +185,7 @@ def _run(
     # Quick replies are taps on a chip, not words: they are not read for
     # frustration (tapping the same chip twice is not a repeated complaint).
     mood = frustration.assess(message, history) if not intent else frustration.Assessment()
+    rescued = None
     try:
         if intent:
             result = agent.run_intent(intent, history)
@@ -199,7 +200,21 @@ def _run(
                 emit("delta", {"text": frustration.ACKNOWLEDGE + "\n\n"})
             if agent.looks_like_rights_question(message):
                 agent.start_speculative_search(message)
-            result = agent.run_agent(message, history)
+            try:
+                result = agent.run_agent(message, history)
+            except HTTPException:
+                raise
+            except Exception as exc:
+                # Every model failed: answer a common question from the booking
+                # instead of the "busy" card. Anything else still fails.
+                rescued = agent.rescue_intent(message)
+                if rescued is None:
+                    raise
+                print(f"[WARN] {type(exc).__name__}: answered as quick reply '{rescued}'", flush=True)
+                if emit is not None:
+                    emit("delta", {"text": agent.RESCUE_NOTE + "\n\n"})
+                result = agent.run_intent(rescued, history)
+                result.reply = f"{agent.RESCUE_NOTE}\n\n{result.reply}"
             if mood.action == "acknowledge":
                 # Sorry first, the answer, then the offer of a person. The
                 # deltas carry the same words, so they still join to the reply.
@@ -237,6 +252,7 @@ def _run(
         "intent": intent,
         "streamed": emit is not None,
         "frustration": mood.action if mood.action != "none" else None,
+        "rescued": rescued,
         "steps": body["steps"],
         "tools": [c["name"] for c in body["tool_calls"]],
         "model": body["model"],

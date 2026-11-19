@@ -71,7 +71,7 @@ def test_quota_error_is_a_clear_503_and_is_logged(monkeypatch, tmp_path):
         raise RuntimeError("429 RESOURCE_EXHAUSTED: quota exceeded")
 
     monkeypatch.setattr(agent, "run_agent", quota)
-    r = client.post("/api/chat", json={"message": "Rebook me"}, headers={"Authorization": "Bearer a"})
+    r = client.post("/api/chat", json={"message": "Tell me about Nairobi"}, headers={"Authorization": "Bearer a"})
     assert r.status_code == 503
     assert "usage limit" in r.json()["detail"]
     line = (tmp_path / "agent-turns.jsonl").read_text(encoding="utf-8").strip()
@@ -90,3 +90,46 @@ def test_successful_turn_is_logged_with_timing(monkeypatch, tmp_path):
     assert "total_ms" in rec and rec["tools"] == []
     # Issue #11: timings and names only, never the passenger's words.
     assert "message" not in rec and '"hi"' not in json.dumps(rec)
+
+
+def test_typed_questions_map_to_the_quick_reply_that_answers_them():
+    assert agent.rescue_intent("What am I entitled to now that my flight was cancelled?") == "entitlements"
+    assert agent.rescue_intent("Do I get a meal voucher?") == "entitlements"
+    assert agent.rescue_intent("Find me the next flight") == "alternatives"
+    assert agent.rescue_intent("Can I talk to someone about my hotel?") == "person"
+    assert agent.rescue_intent("Tell me about Nairobi") is None
+
+
+def test_every_model_failing_answers_a_common_question_from_the_booking(monkeypatch, tmp_path):
+    _valid_session(monkeypatch)
+    monkeypatch.setattr(agent_service, "LOG_DIR", tmp_path)
+
+    def busy(message, history):
+        raise RuntimeError("503 UNAVAILABLE: high demand")
+
+    ran = []
+
+    def quick_reply(intent, history):
+        ran.append(intent)
+        return agent.AgentResult(reply="You are owed a meal voucher.")
+
+    monkeypatch.setattr(agent, "run_agent", busy)
+    monkeypatch.setattr(agent, "run_intent", quick_reply)
+    r = client.post(
+        "/api/chat", json={"message": "What am I entitled to?"}, headers={"Authorization": "Bearer a"}
+    )
+    assert r.status_code == 200
+    assert ran == ["entitlements"]
+    assert r.json()["reply"] == f"{agent.RESCUE_NOTE}\n\nYou are owed a meal voucher."
+    assert json.loads((tmp_path / "agent-turns.jsonl").read_text(encoding="utf-8"))["rescued"] == "entitlements"
+
+
+def test_an_unmatched_question_still_fails_when_every_model_fails(monkeypatch):
+    _valid_session(monkeypatch)
+
+    def busy(message, history):
+        raise RuntimeError("503 UNAVAILABLE: high demand")
+
+    monkeypatch.setattr(agent, "run_agent", busy)
+    r = client.post("/api/chat", json={"message": "Tell me about Nairobi"}, headers={"Authorization": "Bearer a"})
+    assert r.status_code == 502

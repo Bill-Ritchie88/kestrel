@@ -631,20 +631,22 @@ def get_llm():
             options = {"thinking_level": GEMINI_THINKING_LEVEL} if GEMINI_THINKING_LEVEL else {}
 
             names = [GEMINI_MODEL] + [m for m in GEMINI_FALLBACK_MODELS if m != GEMINI_MODEL]
-            last = len(names) - 1
-            # The main model gets one attempt when there is a fallback: retrying
-            # a busy model only delays the switch past the client's 45 s wait.
-            # The last model keeps its retries, as nothing comes after it.
+            # With a fallback, every model gets one attempt of at most 15 s, so
+            # the whole chain (2 x 15 s) and then the no-model rescue finish
+            # inside the client's 45 s wait. On 19 Nov 2026 a 60 s timeout let
+            # a hung main model push a turn to 81 s: the answer came, but the
+            # client had already shown "busy".
+            chained = len(names) > 1
             models = [
                 ChatGoogleGenerativeAI(
                     model=name,
                     temperature=0,
                     api_key=api_key,
-                    max_retries=GEMINI_MAX_ATTEMPTS if i == last else 1,
-                    timeout=GEMINI_TIMEOUT_S,
+                    max_retries=1 if chained else GEMINI_MAX_ATTEMPTS,
+                    timeout=min(GEMINI_TIMEOUT_S, 15.0) if chained else GEMINI_TIMEOUT_S,
                     **options,
                 ).bind_tools(tools)
-                for i, name in enumerate(names)
+                for name in names
             ]
             _llm = models[0] if len(models) == 1 else Failover(models)
     return _llm
@@ -863,6 +865,27 @@ INTENT_TOOLS = {
     "entitlements": "get_entitlements_tool",
     "person": "escalate_to_human_tool",
 }
+
+
+# When every model fails, a typed question is matched to a quick reply by its
+# words, so the common questions still get an answer (NFR-07). First match wins.
+RESCUE_WORDS = (
+    ("person", re.compile(r"\b(person|human|agent|someone|staff|speak|talk)\b")),
+    (
+        "entitlements",
+        re.compile(
+            r"\b(entitle\w*|vouchers?|compensat\w*|meals?|food|hotels?|accommodation|rights|owed|points)\b"
+        ),
+    ),
+    ("alternatives", re.compile(r"\b(flights?|rebook\w*|next|later|earlier|another|seats?|options?)\b")),
+)
+RESCUE_NOTE = "The assistant is busy right now, so this answer comes straight from your booking."
+
+
+def rescue_intent(text: str) -> str | None:
+    """The quick reply that answers a typed question, or None."""
+    lowered = text.lower()
+    return next((intent for intent, words in RESCUE_WORDS if words.search(lowered)), None)
 
 
 _when = when_text  # 'Sun 18 Oct at 16:26' (kestrel.entitlements)
