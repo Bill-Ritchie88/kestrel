@@ -32,14 +32,13 @@ class PublicSection extends StatelessWidget {
 
 /// The crimson tile with the plane, and "Kestrel".
 class PublicLogo extends StatelessWidget {
-  const PublicLogo({super.key, this.prototypeTag = true});
-  final bool prototypeTag;
+  const PublicLogo({super.key});
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     return Semantics(
-      label: 'Kestrel AI assistant${prototypeTag ? ', prototype' : ''}',
+      label: 'Kestrel AI assistant',
       excludeSemantics: true,
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Container(
@@ -54,17 +53,6 @@ class PublicLogo extends StatelessWidget {
         ),
         const SizedBox(width: K.s3),
         Text('Kestrel', style: t.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
-        if (prototypeTag) ...[
-          const SizedBox(width: K.s2),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              border: Border.all(color: K.hairline),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text('PROTOTYPE', style: K.mono(fontSize: 10, letterSpacing: 1, color: K.textSecondary)),
-          ),
-        ],
       ]),
     );
   }
@@ -129,9 +117,9 @@ class PublicHeader extends StatelessWidget {
                   child: InkWell(
                     borderRadius: BorderRadius.circular(8),
                     onTap: () => public.goHome(),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: K.s2),
-                      child: PublicLogo(prototypeTag: wide),
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(vertical: K.s2),
+                      child: PublicLogo(),
                     ),
                   ),
                 ),
@@ -179,10 +167,9 @@ class PublicHeader extends StatelessWidget {
       )..layout())
           .width;
 
-  static double _logoWidth(BuildContext context, {required bool tag}) {
+  static double _logoWidth(BuildContext context) {
     final t = Theme.of(context).textTheme;
-    return 34 + K.s3 + _textWidth(context, 'Kestrel', t.titleLarge?.copyWith(fontWeight: FontWeight.w700)) +
-        (tag ? K.s2 + _textWidth(context, 'PROTOTYPE', K.mono(fontSize: 10, letterSpacing: 1)) + 14 : 0);
+    return 34 + K.s3 + _textWidth(context, 'Kestrel', t.titleLarge?.copyWith(fontWeight: FontWeight.w700));
   }
 
   static double _textButton(BuildContext context, String s) =>
@@ -192,12 +179,12 @@ class PublicHeader extends StatelessWidget {
     final links = _textButton(context, 'How it works') + _textButton(context, 'Your rights') + _textButton(context, 'Help');
     final actions = _textButton(context, 'Sign in') + K.s2 +
         _textWidth(context, 'Manage booking', Theme.of(context).textTheme.labelLarge) + 48;
-    return _logoWidth(context, tag: true) + K.s5 + links + K.s5 + actions;
+    return _logoWidth(context) + K.s5 + links + K.s5 + actions;
   }
 
   /// Logo, "Sign in" and the menu button.
   static double _compactBarWidth(BuildContext context) =>
-      _logoWidth(context, tag: false) + K.s4 + _textButton(context, 'Sign in') + K.touch;
+      _logoWidth(context) + K.s4 + _textButton(context, 'Sign in') + K.touch;
 
   void _menu(BuildContext context, void Function(HomeAnchor) anchor) {
     final public = PublicScope.read(context);

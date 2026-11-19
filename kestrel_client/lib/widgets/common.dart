@@ -64,7 +64,7 @@ class KestrelMark extends StatelessWidget {
 }
 
 /// Shown wherever the app could be mistaken for an airline service.
-const disclaimer = 'Research prototype — not an official Kenya Airways service. Synthetic data.';
+const disclaimer = 'Independent project · not affiliated with Kenya Airways · demo data.';
 
 class BrandLockup extends StatelessWidget {
   const BrandLockup({super.key, this.markSize = 48});

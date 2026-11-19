@@ -94,7 +94,7 @@ class _LinkBookingScreenState extends State<LinkBookingScreen> {
               child: SizedBox(
                 height: 68,
                 child: Row(children: [
-                  const PublicLogo(prototypeTag: false),
+                  const PublicLogo(),
                   const Spacer(),
                   // The address is also in the line above the heading; the
                   // bar repeats it only where there is room.
