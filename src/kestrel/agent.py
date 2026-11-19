@@ -50,6 +50,12 @@ GEMINI_THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "low") or None
 # a quota error then reaches the passenger as a clear message instead.
 GEMINI_MAX_ATTEMPTS = int(os.getenv("GEMINI_MAX_ATTEMPTS", "2"))
 GEMINI_TIMEOUT_S = float(os.getenv("GEMINI_TIMEOUT_S", "20"))
+# Tried in order when the main model fails (503 "high demand", a timeout, a
+# quota error). On 19 Nov 2026 the flash models answered 503 for hours while
+# flash-lite answered with the same key. Set to "" to turn the fallback off.
+GEMINI_FALLBACK_MODELS = [
+    m.strip() for m in os.getenv("GEMINI_FALLBACK_MODELS", "gemini-flash-lite-latest").split(",") if m.strip()
+]
 MAX_TOOL_ITERATIONS = 5
 MAX_HISTORY_TURNS = 10
 
@@ -558,6 +564,52 @@ def _reuse_speculative(question: str) -> dict | None:
     return data
 
 
+class Failover:
+    """Tries each model in order. A model that fails (503 "high demand", a
+    timeout, a quota error) is skipped for cooldown_s, so the next steps of a
+    tool loop and the next turns go straight to one that works."""
+
+    def __init__(self, models: list, cooldown_s: float = 300.0):
+        self.models = models
+        self.cooldown_s = cooldown_s
+        self._skip_until = [0.0] * len(models)
+
+    def _order(self) -> list[int]:
+        now = time.monotonic()
+        live = [i for i in range(len(self.models)) if self._skip_until[i] <= now]
+        return live or list(range(len(self.models)))
+
+    def _failed(self, i: int, exc: Exception) -> None:
+        self._skip_until[i] = time.monotonic() + self.cooldown_s
+        print(f"[WARN] model {i} failed, skipped for {self.cooldown_s:.0f} s: {type(exc).__name__}")
+
+    def invoke(self, messages):
+        error = None
+        for i in self._order():
+            try:
+                return self.models[i].invoke(messages)
+            except Exception as exc:
+                self._failed(i, exc)
+                error = exc
+        raise error
+
+    def stream(self, messages):
+        error = None
+        for i in self._order():
+            started = False
+            try:
+                for chunk in self.models[i].stream(messages):
+                    started = True
+                    yield chunk
+                return
+            except Exception as exc:
+                if started:  # part of the reply is already with the passenger
+                    raise
+                self._failed(i, exc)
+                error = exc
+        raise error
+
+
 _llm = None
 _llm_lock = threading.Lock()
 
@@ -577,15 +629,24 @@ def get_llm():
             if not api_key:
                 raise ValueError("Missing GOOGLE_API_KEY in .env file.")
             options = {"thinking_level": GEMINI_THINKING_LEVEL} if GEMINI_THINKING_LEVEL else {}
-            llm = ChatGoogleGenerativeAI(
-                model=GEMINI_MODEL,
-                temperature=0,
-                api_key=api_key,
-                max_retries=GEMINI_MAX_ATTEMPTS,
-                timeout=GEMINI_TIMEOUT_S,
-                **options,
-            )
-            _llm = llm.bind_tools(tools)
+
+            names = [GEMINI_MODEL] + [m for m in GEMINI_FALLBACK_MODELS if m != GEMINI_MODEL]
+            last = len(names) - 1
+            # The main model gets one attempt when there is a fallback: retrying
+            # a busy model only delays the switch past the client's 45 s wait.
+            # The last model keeps its retries, as nothing comes after it.
+            models = [
+                ChatGoogleGenerativeAI(
+                    model=name,
+                    temperature=0,
+                    api_key=api_key,
+                    max_retries=GEMINI_MAX_ATTEMPTS if i == last else 1,
+                    timeout=GEMINI_TIMEOUT_S,
+                    **options,
+                ).bind_tools(tools)
+                for i, name in enumerate(names)
+            ]
+            _llm = models[0] if len(models) == 1 else Failover(models)
     return _llm
 
 
@@ -604,6 +665,8 @@ class AgentResult:
     # the model call that wrote it (the last one), measured from the turn's
     # start.
     first_token_ms: int = 0
+    # The model that wrote the last step; differs from GEMINI_MODEL after a failover.
+    model: str = GEMINI_MODEL
 
     def timing(self) -> dict:
         return {
@@ -621,7 +684,7 @@ class AgentResult:
             "tool_calls": self.tool_calls,
             "steps": self.steps,
             "stopped_at_limit": self.stopped_at_limit,
-            "model": GEMINI_MODEL,
+            "model": self.model,
             "prompt_version": PROMPT_VERSION,
             "thinking_level": GEMINI_THINKING_LEVEL,
             "timing": self.timing(),
@@ -694,6 +757,7 @@ def run_agent(user_query: str, history: list[dict] | None = None, llm=None) -> A
                 ai_msg = model.invoke(messages)
             result.model_ms.append(round((time.perf_counter() - t0) * 1000))
             messages.append(ai_msg)
+            result.model = (getattr(ai_msg, "response_metadata", None) or {}).get("model_name") or result.model
             result.steps = step
 
             if not ai_msg.tool_calls:
