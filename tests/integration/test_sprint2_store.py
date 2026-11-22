@@ -4,6 +4,7 @@ hand-off cases and the policy store. Live database, always rolled back.
 """
 
 import os
+from pathlib import Path
 
 import asyncpg
 import pytest
@@ -20,6 +21,9 @@ async def conn():
     transaction = connection.transaction()
     await transaction.start()
     try:
+        preview = os.getenv("KESTREL_PREVIEW_MIGRATION")
+        if preview:
+            await connection.execute(Path(preview).read_text(encoding="utf-8"))
         yield connection
     finally:
         await transaction.rollback()
@@ -52,6 +56,11 @@ async def rebooked(conn):
 
 
 async def test_entitlements_are_written_once_per_type(conn, rebooked):
+    if not await conn.fetchval(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_name = 'pnr_bookings' AND column_name = 'onward_flight_id'"
+    ):
+        pytest.skip("load_booking reads pnr_bookings.onward_flight_id: apply migration 015")
     first = await issue_entitlements(conn, rebooked, "PYTEST")
     second = await issue_entitlements(conn, rebooked, "PYTEST")
     types_ = [v["entitlement_type"] for v in second["vouchers"]]
