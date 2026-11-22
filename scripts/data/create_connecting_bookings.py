@@ -157,7 +157,7 @@ def cleanup_statements() -> list[tuple[str, tuple]]:
             WHERE status <> 'AVAILABLE' AND seat_id IN (
                 SELECT unnest(ARRAY[b.assigned_seat_id, b.onward_seat_id]) FROM pnr_bookings b
                 JOIN passengers p USING (passenger_id) WHERE p.email = ANY($1::text[]))""", (EMAILS,)),
-        *((f"DELETE FROM {t} WHERE {ours}", (EMAILS,)) for t in ("vouchers", "handoff_cases", "chat_messages")),  # noqa: S608
+        *((f"DELETE FROM {t} WHERE {ours}", (EMAILS,)) for t in ("vouchers", "handoff_cases", "chat_messages", "compensation_claims")),  # noqa: S608
         (f"DELETE FROM pnr_bookings WHERE {ours}", (EMAILS,)),  # noqa: S608
         ("DELETE FROM passenger_accounts WHERE passenger_id IN "
          "(SELECT passenger_id FROM passengers WHERE email = ANY($1::text[]))", (EMAILS,)),
