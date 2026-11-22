@@ -20,12 +20,17 @@ Endpoint map (Sprint 2):
     GET  /api/chat/history               the booking's conversation (last 20 turns)
     POST /api/chat/history               append one turn (assistant turns: agent service only)
     DELETE /api/chat/history             "Start over"
-    GET  /api/flights/alternatives       FR-03  same route, same cabin, seats left
+    GET  /api/flights/alternatives       FR-03  same route, same cabin, seats left; for a journey
+                                         through NBO (migration 015), journey options to the final
+                                         destination
     GET  /api/flights/{flight_id}/seats  FR-16  seat map of the passenger's cabin on an alternative
+                                         (either leg of a journey option)
     POST /api/reaccommodate/proposal     FR-17  a signed 5-minute confirmation token for one rebooking
-    POST /api/reaccommodate              FR-03, FR-07, FR-16  atomic rebooking (optional seat_id)
-                                         + entitlements; a chosen seat taken first is 409 SEAT_TAKEN;
-                                         from the agent tier only with a confirmation_token (FR-17)
+                                         (both legs of a journey)
+    POST /api/reaccommodate              FR-03, FR-07, FR-16  atomic rebooking (optional seat_id;
+                                         onward_flight_id / onward_seat_id for a journey, all legs or
+                                         none) + entitlements; a chosen seat taken first is 409
+                                         SEAT_TAKEN; from the agent tier only with a confirmation_token
     GET  /api/policy/search              FR-02, FR-05  grounded clauses or a hand-off
     GET  /api/entitlements               FR-04  what the rules say, with reasons
     GET  /api/vouchers                   FR-04  issued vouchers
@@ -67,11 +72,13 @@ from kestrel.api.booking import (
     SQL_VOUCHERS,
     booking_to_dict,
     context_from_booking,
+    is_connecting,
     issue_entitlements,
     load_booking,
     voucher_to_dict,
 )
 from kestrel.api.explain import explain_alternatives
+from kestrel.api.journeys import LEG_CANDIDATES, SQL_JOURNEY_LEGS, build_journeys, find_journey
 from kestrel.api.timing import RequestTimingMiddleware
 from kestrel.entitlements import evaluate, local_iso
 from kestrel.handoff import (
@@ -111,6 +118,7 @@ _BOOKING_CABIN = """
     WITH bk AS (
         SELECT b.pnr_code,
                COALESCE(b.reaccommodated_flight_id, b.original_flight_id) AS current_flight,
+               COALESCE(b.reaccommodated_onward_flight_id, b.onward_flight_id) AS current_onward,
                COALESCE(cs.cabin_class::text, 'ECONOMY')                  AS cabin
         FROM pnr_bookings b
         LEFT JOIN seats cs ON cs.seat_id = b.assigned_seat_id
@@ -149,9 +157,10 @@ SQL_FIND_ALTERNATIVES = _BOOKING_CABIN + """
     LIMIT $2;
 """  # noqa: S608
 
-# FR-16. Every seat of the passenger's cabin on flight $2, only when $2 is one
-# of the booking's alternatives (no rows otherwise). Row by number, so 10A
-# follows 9A.
+# FR-16. Every seat of the passenger's cabin on flight $2, only when $2 is a
+# flight the booking may move to (no rows otherwise): on the route of its
+# current flight or, for a journey through NBO (015), of its onward flight.
+# Row by number, so 10A follows 9A.
 SQL_SEAT_MAP = _BOOKING_CABIN + r"""
     SELECT s.seat_id::text AS seat_id,
            s.seat_number,
@@ -160,8 +169,16 @@ SQL_SEAT_MAP = _BOOKING_CABIN + r"""
            s.status = 'AVAILABLE'                                       AS free,
            alt.aircraft_type,
            bk.cabin                                                     AS cabin_class
-    FROM bk""" + _ALTERNATIVE_FLIGHT + """
-                     AND alt.flight_id = $2
+    FROM bk
+    JOIN flights orig ON orig.flight_id = bk.current_flight
+    LEFT JOIN flights onw ON onw.flight_id = bk.current_onward
+    JOIN flights alt  ON alt.flight_id = $2
+                     AND alt.flight_id <> orig.flight_id
+                     AND alt.flight_id IS DISTINCT FROM onw.flight_id
+                     AND alt.status = 'SCHEDULED'
+                     AND alt.departure_time > now()
+                     AND ((alt.origin = orig.origin AND alt.destination = orig.destination)
+                          OR (alt.origin = onw.origin AND alt.destination = onw.destination))
     JOIN seats s ON s.flight_id = alt.flight_id AND s.cabin_class::text = bk.cabin
     ORDER BY seat_row NULLS LAST, seat_letter;
 """  # noqa: S608
@@ -188,12 +205,17 @@ def seat_layout(aircraft: str | None, cabin: str, letters: list[str]) -> str:
 
 
 SQL_REACCOMMODATE = "SELECT * FROM reaccommodate_passenger_atomic($1, $2, $3, $4);"
+# Migration 015: both legs of a journey through NBO, all or nothing.
+SQL_REACCOMMODATE_JOURNEY = "SELECT * FROM reaccommodate_journey_atomic($1, $2, $3, $4, $5, $6);"
+SQL_ONWARD_LEG = "SELECT onward_flight_id FROM pnr_bookings WHERE pnr_code = $1;"
 
 # reaccommodate_passenger_atomic returns (success, seat, message) and records
 # its reason code only in audit_logs; the message prefix identifies it.
 _REFUSAL_PREFIXES = {
     "Target flight flies ": "DIFFERENT_ROUTE",
-    "That seat was just taken": "SEAT_TAKEN",  # migration 013
+    "Target flights fly ": "DIFFERENT_ROUTE",  # migration 015, a journey
+    "Connection too short": "CONNECTION_TOO_SHORT",
+    "That seat was just taken": "SEAT_TAKEN",  # 013; 015 adds "... on your onward flight"
     "That seat is not on the chosen flight": "SEAT_NOT_ON_FLIGHT",
     "Seat ": "SEAT_WRONG_CABIN",
 }
@@ -335,6 +357,10 @@ class ReaccommodateRequest(BaseModel):
     target_flight_id: str = Field(..., examples=["c2eebc99-9c0b-4ef8-bb6d-6bb9bd380a33"])
     # FR-16: the seat the passenger chose; absent, the procedure picks one.
     seat_id: uuid.UUID | None = None
+    # Migration 015: the onward leg of a journey through NBO (required for a
+    # connecting booking, which never moves one leg alone) and its seat.
+    onward_flight_id: uuid.UUID | None = None
+    onward_seat_id: uuid.UUID | None = None
     # FR-17: from POST /api/reaccommodate/proposal, sent back by the passenger's
     # tap on "Confirm rebooking". Required when the agent tier calls.
     confirmation_token: str | None = Field(default=None, max_length=512)
@@ -343,6 +369,8 @@ class ReaccommodateRequest(BaseModel):
 class ProposalRequest(BaseModel):
     target_flight_id: str = Field(..., max_length=64)
     seat_id: uuid.UUID | None = None
+    onward_flight_id: uuid.UUID | None = None
+    onward_seat_id: uuid.UUID | None = None
 
 
 class HandoffRequest(BaseModel):
@@ -594,14 +622,16 @@ async def find_alternatives(
     limit = max(1, min(limit, 10))
 
     # The booking is read alongside, on its own connection, for the reasons.
-    rows, booking = await asyncio.gather(
+    rows, legs, booking = await asyncio.gather(
         _fetch(pool, SQL_FIND_ALTERNATIVES, session.pnr_code, limit),
+        _fetch(pool, SQL_JOURNEY_LEGS, session.pnr_code, LEG_CANDIDATES),
         _fetchrow(pool, SQL_LOAD_BOOKING, session.pnr_code),
     )
+    options = _options(booking, rows, legs, limit)
     return {
         "pnr_code": session.pnr_code,
-        "count": len(rows),
-        "alternatives": _explained(rows, booking),
+        "count": len(options),
+        "alternatives": options,
     }
 
 
@@ -640,6 +670,19 @@ async def seat_map(
             for r in rows
         ],
     }
+
+
+def _options(booking, rows, legs, limit: int) -> list[dict]:
+    """What the passenger may move to: journey options to the final
+    destination for a journey through NBO (migration 015), otherwise the
+    same-route alternatives."""
+    if booking is not None and is_connecting(booking):
+        return explain_alternatives(build_journeys(legs, limit), booking)
+    return _explained(rows, booking)
+
+
+def _public(option: dict) -> dict:
+    return {k: v for k, v in option.items() if not k.startswith("_")}
 
 
 def _explained(rows, booking) -> list[dict]:
@@ -704,9 +747,10 @@ async def trip(
     four. The entitlement decision is computed from the booking row, with no
     further query.
     """
-    booking, alternatives, vouchers, cases = await asyncio.gather(
+    booking, alternatives, legs, vouchers, cases = await asyncio.gather(
         _fetchrow(pool, SQL_LOAD_BOOKING, session.pnr_code),
         _fetch(pool, SQL_FIND_ALTERNATIVES, session.pnr_code, TRIP_ALTERNATIVES),
+        _fetch(pool, SQL_JOURNEY_LEGS, session.pnr_code, LEG_CANDIDATES),
         _fetch(pool, SQL_VOUCHERS, session.pnr_code),
         _fetch(pool, SQL_LIST_FOR_PNR, session.pnr_code),
     )
@@ -717,7 +761,7 @@ async def trip(
     return {
         "pnr_code": session.pnr_code,
         "booking": booking_body,
-        "alternatives": _explained(alternatives, booking),
+        "alternatives": _options(booking, alternatives, legs, TRIP_ALTERNATIVES),
         "entitlements": {
             "decision": evaluate(context_from_booking(booking)).to_dict(),
             "vouchers": [voucher_to_dict(v) for v in vouchers],
@@ -725,7 +769,7 @@ async def trip(
         "cases": case_bodies,
         "suggestions": suggestions(booking_body, case_bodies),
         # Airport names for the client (kestrel.airports, the one list).
-        "cities": cities_for(booking["origin"], booking["destination"]),
+        "cities": cities_for(booking["origin"], booking["destination"], booking_body["final_destination"]),
     }
 
 
@@ -741,19 +785,38 @@ async def propose_rebooking(
     bound to this booking, this flight and this seat choice, valid for five
     minutes and once. Nothing is changed.
     """
-    # 50: every alternative, not just the top five the trip shows.
-    rows = await _fetch(pool, SQL_FIND_ALTERNATIVES, session.pnr_code, 50)
-    row = next((r for r in rows if r["flight_id"] == payload.target_flight_id.lower()), None)
-    if row is None:
+    onward_id = str(payload.onward_flight_id) if payload.onward_flight_id else None
+    if onward_id:
+        # Every journey option (migration 015), not just the top five the trip shows.
+        legs = await _fetch(pool, SQL_JOURNEY_LEGS, session.pnr_code, LEG_CANDIDATES)
+        journey = find_journey(build_journeys(legs, 200), payload.target_flight_id, onward_id)
+        flight = _public(journey) if journey else None
+    else:
+        # 50: every alternative, not just the top five the trip shows. A
+        # connecting booking has none: it must name its onward flight.
+        onward = await _fetchrow(pool, SQL_ONWARD_LEG, session.pnr_code)
+        rows = (
+            []
+            if onward and onward["onward_flight_id"]
+            else await _fetch(pool, SQL_FIND_ALTERNATIVES, session.pnr_code, 50)
+        )
+        row = next((r for r in rows if r["flight_id"] == payload.target_flight_id.lower()), None)
+        flight = alternative_to_dict(row) if row else None
+    if flight is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="That flight is not one your booking can move to. Nothing was changed.",
         )
     seat_id = str(payload.seat_id) if payload.seat_id else None
-    token, ttl = issue_confirmation(pnr_code=session.pnr_code, flight_id=row["flight_id"], seat_id=seat_id)
+    onward_seat_id = str(payload.onward_seat_id) if payload.onward_seat_id else None
+    token, ttl = issue_confirmation(
+        pnr_code=session.pnr_code, flight_id=flight["flight_id"], seat_id=seat_id,
+        onward_flight_id=onward_id, onward_seat_id=onward_seat_id,
+    )  # fmt: skip
     return {
-        "flight": alternative_to_dict(row),
+        "flight": flight,
         "seat_id": seat_id,
+        "onward_seat_id": onward_seat_id,
         "confirmation_token": token,
         "expires_in": ttl,
     }
@@ -785,6 +848,8 @@ async def reaccommodate_passenger(
                 pnr_code=session.pnr_code,
                 flight_id=payload.target_flight_id,
                 seat_id=str(payload.seat_id) if payload.seat_id else None,
+                onward_flight_id=str(payload.onward_flight_id) if payload.onward_flight_id else None,
+                onward_seat_id=str(payload.onward_seat_id) if payload.onward_seat_id else None,
             )
         except ValueError as exc:
             raise HTTPException(
@@ -801,13 +866,34 @@ async def reaccommodate_passenger(
         )
     async with pool.acquire() as conn:
         try:
-            result = await conn.fetchrow(
-                SQL_REACCOMMODATE,
-                session.pnr_code,  # from the token, never the request body
-                payload.target_flight_id,
-                session.audit_actor(),  # server-derived, unforgeable
-                payload.seat_id,
-            )
+            if payload.onward_flight_id is not None:
+                # Both legs or neither (migration 015).
+                result = await conn.fetchrow(
+                    SQL_REACCOMMODATE_JOURNEY,
+                    session.pnr_code,
+                    payload.target_flight_id,
+                    payload.onward_flight_id,
+                    session.audit_actor(),
+                    payload.seat_id,
+                    payload.onward_seat_id,
+                )
+            elif await conn.fetchval(SQL_ONWARD_LEG, session.pnr_code):
+                # Moving only leg 1 of a journey could strand the passenger at
+                # the hub: a connecting booking moves as a whole journey.
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="This booking has a connection: choose a journey option for both "
+                    "flights. Nothing was changed.",
+                    headers={"X-Refusal-Reason": "JOURNEY_REQUIRED"},
+                )
+            else:
+                result = await conn.fetchrow(
+                    SQL_REACCOMMODATE,
+                    session.pnr_code,  # from the token, never the request body
+                    payload.target_flight_id,
+                    session.audit_actor(),  # server-derived, unforgeable
+                    payload.seat_id,
+                )
         except asyncpg.DataError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -849,6 +935,7 @@ async def reaccommodate_passenger(
     return {
         "success": True,
         "assigned_seat": result["assigned_seat_number"],
+        "onward_seat": result.get("onward_seat_number"),
         "message": result["message"],
         "booking": booking_to_dict(booking) if booking else None,
         "entitlements": issued,

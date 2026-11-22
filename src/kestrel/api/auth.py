@@ -145,11 +145,22 @@ _CONFIRMATION = "rebook-confirmation"
 _used_confirmations: dict[str, float] = {}
 
 
-def issue_confirmation(*, pnr_code: str, flight_id: str, seat_id: str | None) -> tuple[str, int]:
+def issue_confirmation(
+    *,
+    pnr_code: str,
+    flight_id: str,
+    seat_id: str | None,
+    onward_flight_id: str | None = None,
+    onward_seat_id: str | None = None,
+) -> tuple[str, int]:
+    """Bound to the booking, the flight and seat choice and, for a journey
+    through NBO (migration 015), the onward flight and its seat choice."""
     payload = {
         "pnr": pnr_code,
         "flight": flight_id.lower(),
         "seat": seat_id.lower() if seat_id else None,
+        "onward": onward_flight_id.lower() if onward_flight_id else None,
+        "onward_seat": onward_seat_id.lower() if onward_seat_id else None,
         "jti": secrets.token_urlsafe(12),
         "exp": int(time.time()) + CONFIRMATION_TTL_SECONDS,
     }
@@ -157,7 +168,15 @@ def issue_confirmation(*, pnr_code: str, flight_id: str, seat_id: str | None) ->
     return f"{payload_b64}.{_sign(payload_b64, _CONFIRMATION)}", CONFIRMATION_TTL_SECONDS
 
 
-def verify_confirmation(token: str, *, pnr_code: str, flight_id: str, seat_id: str | None) -> str:
+def verify_confirmation(
+    token: str,
+    *,
+    pnr_code: str,
+    flight_id: str,
+    seat_id: str | None,
+    onward_flight_id: str | None = None,
+    onward_seat_id: str | None = None,
+) -> str:
     """The token's id if it confirms exactly this rebooking; otherwise
     ValueError with the reason."""
     try:
@@ -179,6 +198,10 @@ def verify_confirmation(token: str, *, pnr_code: str, flight_id: str, seat_id: s
     if payload.get("flight") != flight_id.lower():
         raise ValueError("The confirmation is for another flight.")
     if payload.get("seat") != (seat_id.lower() if seat_id else None):
+        raise ValueError("The confirmation is for another seat choice.")
+    if payload.get("onward") != (onward_flight_id.lower() if onward_flight_id else None):
+        raise ValueError("The confirmation is for another onward flight.")
+    if payload.get("onward_seat") != (onward_seat_id.lower() if onward_seat_id else None):
         raise ValueError("The confirmation is for another seat choice.")
     if jti in _used_confirmations:
         raise ValueError("This confirmation has already been used.")

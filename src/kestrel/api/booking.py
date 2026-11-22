@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import json
 import secrets
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import asyncpg
 
+from kestrel.api.journeys import leg_statuses
 from kestrel.entitlements import (
     STORABLE_TYPES,
     DisruptionContext,
@@ -40,12 +42,32 @@ SQL_LOAD_BOOKING = """
            c.departure_time                 AS current_departure,
            c.arrival_time                   AS current_arrival,
            s.seat_number,
-           COALESCE(s.cabin_class::text, 'ECONOMY') AS cabin_class
+           COALESCE(s.cabin_class::text, 'ECONOMY') AS cabin_class,
+           -- Migration 015: the onward leg of a journey through NBO (NULL
+           -- for a single-flight booking), as booked and as rebooked.
+           w.flight_id::text                AS onward_flight_id,
+           w.flight_number                  AS onward_flight_number,
+           w.origin                         AS onward_origin,
+           w.destination                    AS onward_destination,
+           w.departure_time                 AS onward_departure,
+           w.arrival_time                   AS onward_arrival,
+           w.status::text                   AS onward_status,
+           w.disruption_reason              AS onward_disruption_reason,
+           w.aircraft_type                  AS onward_aircraft,
+           w.cancelled_at                   AS onward_cancelled_at,
+           cw.flight_id::text               AS current_onward_flight_id,
+           cw.flight_number                 AS current_onward_flight_number,
+           cw.departure_time                AS current_onward_departure,
+           cw.arrival_time                  AS current_onward_arrival,
+           ws.seat_number                   AS onward_seat_number
     FROM pnr_bookings b
     JOIN passengers p ON p.passenger_id = b.passenger_id
     JOIN flights    o ON o.flight_id    = b.original_flight_id
     LEFT JOIN flights c ON c.flight_id  = b.reaccommodated_flight_id
     LEFT JOIN seats   s ON s.seat_id    = b.assigned_seat_id
+    LEFT JOIN flights w  ON w.flight_id  = b.onward_flight_id
+    LEFT JOIN flights cw ON cw.flight_id = b.reaccommodated_onward_flight_id
+    LEFT JOIN seats   ws ON ws.seat_id   = b.onward_seat_id
     WHERE b.pnr_code = $1;
 """
 
@@ -147,7 +169,64 @@ def booking_to_dict(row) -> dict:
         ),
         "seat_number": row["seat_number"],
         "cabin_class": row["cabin_class"],
+        **_journey_fields(row),
     }
+
+
+def is_connecting(row) -> bool:
+    """A journey through NBO (migration 015). .get: the unit tests' fake rows
+    have no onward columns."""
+    return bool(row.get("onward_flight_id"))
+
+
+def _journey_fields(row) -> dict:
+    """The onward leg and both legs' status (My trip's "Missed connection").
+    A single-flight booking: no legs and no onward flight."""
+    if not is_connecting(row):
+        return {"legs": [], "onward_flight": None, "current_onward_flight": None,
+                "onward_seat_number": None, "final_destination": row["destination"]}  # fmt: skip
+    first, onward = leg_statuses(
+        row["original_status"], row["original_arrival"], row["onward_status"], row["onward_departure"]
+    )
+    hub, final = row["onward_origin"], row["onward_destination"]
+    onward_flight = {
+        "flight_id": row["onward_flight_id"],
+        "flight_number": row["onward_flight_number"],
+        "origin": hub,
+        "destination": final,
+        "departure_time": _iso(row["onward_departure"]),
+        "arrival_time": _iso(row["onward_arrival"]),
+        "departure_local": local_iso(row["onward_departure"], hub),
+        "arrival_local": local_iso(row["onward_arrival"], final),
+        "status": row["onward_status"],
+        "disruption_reason": row["onward_disruption_reason"],
+        "aircraft_type": row["onward_aircraft"],
+    }
+    legs = [
+        {"leg": 1, "flight_id": row["original_flight_id"], "flight_number": row["original_flight_number"],
+         "origin": row["origin"], "destination": row["destination"],
+         "departure_local": local_iso(row["original_departure"], row["origin"]),
+         "arrival_local": local_iso(row["original_arrival"], row["destination"]),
+         "leg_status": first},
+        {"leg": 2, "flight_id": row["onward_flight_id"], "flight_number": row["onward_flight_number"],
+         "origin": hub, "destination": final,
+         "departure_local": onward_flight["departure_local"], "arrival_local": onward_flight["arrival_local"],
+         "leg_status": onward},
+    ]  # fmt: skip
+    current_onward = (
+        {
+            "flight_id": row["current_onward_flight_id"],
+            "flight_number": row["current_onward_flight_number"],
+            "departure_time": _iso(row["current_onward_departure"]),
+            "arrival_time": _iso(row["current_onward_arrival"]),
+            "departure_local": local_iso(row["current_onward_departure"], hub),
+            "arrival_local": local_iso(row["current_onward_arrival"], final),
+        }
+        if row["current_onward_flight_id"]
+        else None
+    )
+    return {"legs": legs, "onward_flight": onward_flight, "current_onward_flight": current_onward,
+            "onward_seat_number": row["onward_seat_number"], "final_destination": final}  # fmt: skip
 
 
 def voucher_to_dict(row) -> dict:
@@ -171,6 +250,8 @@ async def load_booking(conn, pnr_code: str):
 
 
 def context_from_booking(row, now: datetime | None = None) -> DisruptionContext:
+    if is_connecting(row):
+        return _journey_context(row, now)
     return DisruptionContext(
         pnr_code=row["pnr_code"],
         rewards_tier=row["asante_rewards_tier"],
@@ -188,6 +269,50 @@ def context_from_booking(row, now: datetime | None = None) -> DisruptionContext:
         notified_at=row.get("cancelled_at"),
         now=now or datetime.now(UTC),
     )
+
+
+def _journey_context(row, now: datetime | None) -> DisruptionContext:
+    """A journey through NBO, for the rules engine.
+
+    The Regulation's scope and distance band are the journey's, from the first
+    origin to the final destination (a connecting journey on one booking counts
+    as one), and the delay is measured at the FINAL destination against the
+    onward leg's scheduled arrival. Cause and notice are those of the leg that
+    broke the journey. The wait for care starts at the first leg that changes:
+    the original departure when leg 1 moves, the onward departure (at the hub)
+    when leg 1 is kept."""
+    if row["original_status"] == "CANCELLED" or row["onward_status"] != "CANCELLED":
+        reason, notified = row["disruption_reason"], row.get("cancelled_at")
+    else:
+        reason, notified = row["onward_disruption_reason"], row.get("onward_cancelled_at")
+    ctx = DisruptionContext(
+        pnr_code=row["pnr_code"],
+        rewards_tier=row["asante_rewards_tier"],
+        booking_status=row["booking_status"],
+        origin=row["origin"],
+        destination=row["onward_destination"],
+        scheduled_departure=row["original_departure"],
+        scheduled_arrival=row["onward_arrival"],
+        disruption_reason=reason,
+        notified_at=notified,
+        now=now or datetime.now(UTC),
+    )
+    if not row["current_flight_id"]:
+        return ctx
+    first_kept = row["current_flight_id"] == row["original_flight_id"]
+    departure = row["current_onward_departure"] if first_kept else row["current_departure"]
+    return journey_option_context(ctx, row, departure, row["current_onward_arrival"], first_kept)
+
+
+def journey_option_context(ctx, row, departure, final_arrival, first_kept: bool) -> DisruptionContext:
+    """ctx as if the passenger flew a journey whose first changed leg leaves at
+    `departure` and which reaches the final destination at `final_arrival`."""
+    if first_kept:
+        # shortcut: hotel nights are counted in the origin's time zone, not the hub's;
+        # the same zone on the demo routes (East Africa), revisit for origins elsewhere.
+        return replace(ctx, scheduled_departure=row["onward_departure"], new_departure=departure,
+                       new_arrival=final_arrival)  # fmt: skip
+    return replace(ctx, new_departure=departure, new_arrival=final_arrival)
 
 
 ISSUE_ATTEMPTS = 3

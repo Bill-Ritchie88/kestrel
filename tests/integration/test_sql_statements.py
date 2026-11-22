@@ -20,7 +20,7 @@ import asyncpg
 import pytest
 
 from kestrel import handoff
-from kestrel.api import accounts, booking, history, main
+from kestrel.api import accounts, booking, history, journeys, main
 from kestrel.policy import retriever
 
 pytestmark = pytest.mark.integration
@@ -28,7 +28,7 @@ pytestmark = pytest.mark.integration
 STATEMENTS = sorted(
     {
         (f"{module.__name__.rsplit('.', 1)[-1]}.{name}", getattr(module, name))
-        for module in (handoff, booking, main, retriever, accounts, history)
+        for module in (handoff, booking, main, retriever, accounts, history, journeys)
         for name in dir(module)
         if name.startswith("SQL_") and isinstance(getattr(module, name), str)
     }
@@ -65,4 +65,9 @@ async def test_statement_prepares_against_the_live_schema(conn, name, sql):
         "WHERE table_name = 'chat_messages' AND column_name = 'prompt_version'"
     ):
         pytest.skip("chat_messages.prompt_version does not exist yet: apply migration 014")
+    if ("onward" in sql or "journey" in sql) and not await conn.fetchval(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_name = 'pnr_bookings' AND column_name = 'onward_flight_id'"
+    ):
+        pytest.skip("pnr_bookings.onward_flight_id does not exist yet: apply migration 015")
     await conn.prepare(sql)

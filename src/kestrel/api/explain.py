@@ -23,7 +23,7 @@ from dataclasses import replace
 from datetime import datetime
 
 from kestrel.airports import city as _city
-from kestrel.api.booking import context_from_booking
+from kestrel.api.booking import context_from_booking, journey_option_context
 from kestrel.entitlements import evaluate, local_iso, when_text
 
 ALMOST_FULL_SEATS = 5
@@ -47,8 +47,6 @@ def explain_alternatives(alternatives: list[dict], booking, context=None) -> lis
     if not alternatives:
         return []
     ctx = context if context is not None else context_from_booking(booking)
-    origin, destination = booking["origin"], booking["destination"]
-    original = booking["original_departure"]
     seats = [a["available_seats"] for a in alternatives]
     most = max(seats)
     most_is_unique = seats.count(most) == 1
@@ -56,6 +54,13 @@ def explain_alternatives(alternatives: list[dict], booking, context=None) -> lis
     out = []
     for i, alt in enumerate(alternatives):
         dep, arr = alt["_departure"], alt["_arrival"]
+        # A journey option (migration 015) is timed from its first changed
+        # leg and reaches the final destination; see journey_option_context.
+        journey = "onward" in alt
+        kept = alt.get("_first_kept", False)
+        origin = booking["destination"] if kept else booking["origin"]
+        destination = alt.get("final_destination") or booking["destination"]
+        original = booking["onward_departure"] if kept else booking["original_departure"]
         wait_h = round((dep - original).total_seconds() / 3600, 1)
         badges: list[str] = []
         reasons: list[str] = []
@@ -73,7 +78,16 @@ def explain_alternatives(alternatives: list[dict], booking, context=None) -> lis
                 + ("later." if wait_h >= 0 else "earlier.")
             )
 
-        decision = evaluate(replace(ctx, new_departure=dep, new_arrival=arr))
+        if journey:
+            o = alt["onward"]
+            reasons.append(
+                (f"Keeps your flight to {_city(alt['destination'])}, then " if kept
+                 else f"Via {_city(alt['destination'])}, ")
+                + f"{o['flight_number']} with {alt['connection_minutes']} minutes to connect."
+            )  # fmt: skip
+            decision = evaluate(journey_option_context(ctx, booking, dep, arr, kept))
+        else:
+            decision = evaluate(replace(ctx, new_departure=dep, new_arrival=arr))
         kinds = {e.entitlement_type for e in decision.entitlements}
         if "HOTEL" in kinds:
             badges.append("NEXT_DAY_HOTEL")

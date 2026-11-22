@@ -560,7 +560,7 @@ def test_trip_runs_its_queries_at_once_on_separate_connections(token):
         assert TestClient(main.app).get("/api/trip", headers=token).status_code == 200
     finally:
         main.app.dependency_overrides.clear()
-    assert pool.most == 4
+    assert pool.most == 5  # booking, alternatives, journey legs (015), vouchers, cases
 
 
 def test_large_responses_are_gzipped(client, conn, token):
