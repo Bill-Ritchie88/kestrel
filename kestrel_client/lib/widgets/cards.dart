@@ -93,8 +93,14 @@ class TripTicket extends StatelessWidget {
             Text.rich(
               TextSpan(style: small, children: [
                 const TextSpan(text: 'Replaces '),
-                TextSpan(text: f.number, style: const TextStyle(decoration: TextDecoration.lineThrough)),
-                TextSpan(text: reason == null ? ', cancelled.' : ', cancelled because of $reason.'),
+                TextSpan(
+                    text: booking.disruptedFlight.number,
+                    style: const TextStyle(decoration: TextDecoration.lineThrough)),
+                TextSpan(
+                    text: switch (reasonText[booking.disruptedFlight.disruptionReason]) {
+                  null => ', ${booking.disruptionWord}.',
+                  final r => ', ${booking.disruptionWord} because of $r.',
+                }),
               ]),
             ),
           ],
@@ -737,12 +743,13 @@ class RecoveryTracker extends StatelessWidget {
   List<_Step> _steps() {
     final f = booking.original;
     final c = booking.current;
-    final reason = reasonText[f.disruptionReason];
+    final d = booking.disruptedFlight;
+    final reason = reasonText[d.disruptionReason];
     final rebooked = booking.isRebooked && c != null;
     final steps = <_Step>[];
     if (booking.isDisrupted || booking.isRebooked) {
-      steps.add(_Step('Flight cancelled',
-          '${f.number} · ${reason == null ? dayLabel(f.departureLocal) : 'because of $reason'}', _StepState.done));
+      steps.add(_Step('Flight ${booking.disruptionWord}',
+          '${d.number} · ${reason == null ? dayLabel(d.departureLocal) : 'because of $reason'}', _StepState.done));
     } else {
       steps.add(_Step('Booking ${titleCase(booking.status)}',
           '${f.number} · ${dayLabel(f.departureLocal)}', _StepState.done));
@@ -771,6 +778,8 @@ class RecoveryTracker extends StatelessWidget {
       steps.add(const _Step('Choose a new flight', 'Same route and cabin, at no charge.', _StepState.current));
       steps.add(const _Step('Collect your vouchers', 'Issued as soon as you rebook.', _StepState.pending));
       steps.add(const _Step('Travel', 'Your new departure will show here.', _StepState.pending));
+    } else if (booking.isCancelled) {
+      steps.add(const _Step('Refund requested', 'Kenya Airways customer care reviews it.', _StepState.current));
     } else {
       steps.add(_Step('Travel', 'Departs ${dayLabel(f.departureLocal)} at ${hhmm(f.departureLocal)}.',
           _StepState.current));

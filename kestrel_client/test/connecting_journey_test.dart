@@ -194,4 +194,46 @@ void main() {
       'onward_flight_id': 'f-2',
     });
   });
+
+  group('labels name the leg that broke', () {
+    Booking with_(Map<String, dynamic> over) => Booking({..._booking.json, ...over});
+    final firstOk = {..._booking.json['original_flight'] as Map<String, dynamic>, 'status': 'SCHEDULED',
+        'disruption_reason': null};
+    final onwardCancelled = {..._booking.json['onward_flight'] as Map<String, dynamic>, 'status': 'CANCELLED',
+        'departure_local': '2026-12-01T08:00+03:00'};
+
+    testWidgets('onward leg cancelled: the tracker names the onward flight', (tester) async {
+      await _pump(tester, RecoveryTracker(booking: with_({'original_flight': firstOk, 'onward_flight': onwardCancelled})));
+      expect(find.text('Flight cancelled'), findsOneWidget);
+      expect(find.textContaining('KQ410'), findsOneWidget);
+      expect(find.textContaining('KQ603'), findsNothing);
+    });
+
+    testWidgets('first leg delayed: the tracker says delayed, not cancelled', (tester) async {
+      await _pump(tester, RecoveryTracker(booking: with_({
+        'original_flight': {...firstOk, 'status': 'DELAYED'},
+      })));
+      expect(find.text('Flight delayed'), findsOneWidget);
+      expect(find.text('Flight cancelled'), findsNothing);
+    });
+
+    testWidgets('rebooked connection: "Replaces" names the cancelled onward leg', (tester) async {
+      await _pump(tester, TripTicket(booking: with_({
+        'booking_status': 'REACCOMMODATED',
+        'original_flight': firstOk,
+        'onward_flight': onwardCancelled,
+        'current_flight': {...firstOk, 'flight_id': 'n-1', 'flight_number': 'KQ609'},
+      })));
+      final replaces = find.byWidgetPredicate(
+          (w) => w is RichText && w.text.toPlainText().startsWith('Replaces '));
+      expect(replaces, findsOneWidget);
+      expect((tester.widget(replaces) as RichText).text.toPlainText(), 'Replaces KQ410, cancelled.');
+    });
+
+    testWidgets('cancelled for a refund: "Refund requested", no travel step', (tester) async {
+      await _pump(tester, RecoveryTracker(booking: with_({'booking_status': 'CANCELLED'})));
+      expect(find.text('Refund requested'), findsOneWidget);
+      expect(find.text('Travel'), findsNothing);
+    });
+  });
 }

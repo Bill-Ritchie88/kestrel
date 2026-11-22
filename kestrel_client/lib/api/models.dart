@@ -133,6 +133,16 @@ class Booking {
   /// database procedure enforces it).
   bool get refundable => json['refundable'] == true;
 
+  /// The flight that broke the trip: on a connection whose first leg still
+  /// flies, the cancelled onward leg; otherwise the first (cancelled or delayed).
+  Flight get disruptedFlight {
+    final o = onward;
+    return original.status != 'CANCELLED' && o?.status == 'CANCELLED' ? o! : original;
+  }
+
+  /// 'cancelled' or 'delayed', for the labels that name what happened.
+  String get disruptionWord => disruptedFlight.status == 'DELAYED' ? 'delayed' : 'cancelled';
+
   /// Disrupted again: the flight it was rebooked onto was cancelled too.
   bool get isDisruptedAgain => isDisrupted && current != null;
 
