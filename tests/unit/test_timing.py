@@ -35,7 +35,7 @@ def test_each_request_is_logged_with_ids_masked_and_no_query(tmp_path, monkeypat
     assert [r["path"] for r in records] == [
         "/api/staff/cases/{case_id}/resolve",
         "/api/flights/{id}/{id}",
-        "/api/{id}/{id}",
+        "/api/booking/{id}",  # "booking" is a route word (POST /api/booking/cancel); the PNR is not
         "/api/me",
     ]
     assert records[1]["status"] == 404

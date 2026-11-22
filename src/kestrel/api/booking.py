@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import secrets
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 
@@ -37,6 +37,9 @@ SQL_LOAD_BOOKING = """
            o.disruption_reason,
            o.aircraft_type                  AS original_aircraft,
            o.cancelled_at,
+           -- Migration 016: the times before a delay (NULL if never moved).
+           o.scheduled_departure_time       AS original_scheduled_departure,
+           o.scheduled_arrival_time         AS original_scheduled_arrival,
            c.flight_id::text                AS current_flight_id,
            c.flight_number                  AS current_flight_number,
            c.departure_time                 AS current_departure,
@@ -154,7 +157,11 @@ def booking_to_dict(row) -> dict:
             "status": row["original_status"],
             "disruption_reason": row["disruption_reason"],
             "aircraft_type": row["original_aircraft"],
+            # Migration 016: a delay, against the time before it (None: not delayed or unknown).
+            "scheduled_departure_local": local_iso(row.get("original_scheduled_departure"), row["origin"]),
+            "delay_minutes": delay_minutes(row),
         },
+        "refundable": refundable(row),
         "current_flight": (
             {
                 "flight_id": row["current_flight_id"],
@@ -171,6 +178,32 @@ def booking_to_dict(row) -> dict:
         "cabin_class": row["cabin_class"],
         **_journey_fields(row),
     }
+
+
+REFUND_DELAY = timedelta(hours=5)
+
+
+def delay_minutes(row) -> int | None:
+    """How late the booked flight now leaves (migration 016), if it was delayed."""
+    scheduled = row.get("original_scheduled_departure")
+    if row["original_status"] != "DELAYED" or scheduled is None:
+        return None
+    return round((row["original_departure"] - scheduled).total_seconds() / 60)
+
+
+def refundable(row, now: datetime | None = None) -> bool:
+    """Whether "Cancel and request a refund" is offered: the same rule that
+    cancel_booking_for_refund (migration 016) enforces, for the button only."""
+    status = row["booking_status"]
+    current = row["current_departure"] or row["original_departure"]
+    if status not in ("DISRUPTED", "CONFIRMED"):
+        return False
+    if row["original_status"] != "CANCELLED" and current <= (now or datetime.now(UTC)):
+        return False
+    if status == "CONFIRMED":
+        minutes = delay_minutes(row)
+        return minutes is not None and minutes >= REFUND_DELAY.total_seconds() / 60
+    return True
 
 
 def is_connecting(row) -> bool:
@@ -249,9 +282,31 @@ async def load_booking(conn, pnr_code: str):
     return await conn.fetchrow(SQL_LOAD_BOOKING, pnr_code)
 
 
-def context_from_booking(row, now: datetime | None = None) -> DisruptionContext:
+def context_from_booking(row, now: datetime | None = None, no_alternatives: bool = False) -> DisruptionContext:
+    """The rules' view of a booking. no_alternatives: no later flight has a seat
+    (an open NO_ALTERNATIVES case), which gives a stranded passenger a hotel."""
     if is_connecting(row):
-        return _journey_context(row, now)
+        return replace(_journey_context(row, now), no_alternatives=no_alternatives)
+    # Disrupted again (016): the rebooked flight was cancelled too, so it no
+    # longer counts as the new flight.
+    rebooked = row["booking_status"] != "DISRUPTED"
+    if row.get("original_status") == "DELAYED":
+        # A delay: the scheduled times are those before it, the new times are the flight's own.
+        return DisruptionContext(
+            pnr_code=row["pnr_code"],
+            rewards_tier=row["asante_rewards_tier"],
+            booking_status=row["booking_status"],
+            origin=row["origin"],
+            destination=row["destination"],
+            scheduled_departure=row.get("original_scheduled_departure") or row["original_departure"],
+            scheduled_arrival=row.get("original_scheduled_arrival") or row["original_arrival"],
+            disruption_reason=row["disruption_reason"],
+            new_departure=row["original_departure"] if row.get("original_scheduled_departure") else None,
+            new_arrival=row["original_arrival"] if row.get("original_scheduled_arrival") else None,
+            now=now or datetime.now(UTC),
+            flight_status="DELAYED",
+            no_alternatives=no_alternatives,
+        )
     return DisruptionContext(
         pnr_code=row["pnr_code"],
         rewards_tier=row["asante_rewards_tier"],
@@ -261,13 +316,15 @@ def context_from_booking(row, now: datetime | None = None) -> DisruptionContext:
         scheduled_departure=row["original_departure"],
         scheduled_arrival=row["original_arrival"],
         disruption_reason=row["disruption_reason"],
-        new_departure=row["current_departure"],
-        new_arrival=row["current_arrival"],
+        new_departure=row["current_departure"] if rebooked else None,
+        new_arrival=row["current_arrival"] if rebooked else None,
         # When the flight was cancelled (migration 012's trigger), so the
         # EU261 notice rule gives the same answer whatever day it is asked
         # (issue #13). None only for a flight that is not cancelled.
         notified_at=row.get("cancelled_at"),
         now=now or datetime.now(UTC),
+        flight_status=row.get("original_status"),
+        no_alternatives=no_alternatives,
     )
 
 
@@ -296,8 +353,11 @@ def _journey_context(row, now: datetime | None) -> DisruptionContext:
         disruption_reason=reason,
         notified_at=notified,
         now=now or datetime.now(UTC),
+        # shortcut: a refunded journey counts as cancelled and a delay that keeps the
+        # connection gets no delay rules; add per-leg delays if journeys need them.
+        flight_status="CANCELLED" if row["booking_status"] == "CANCELLED" else None,
     )
-    if not row["current_flight_id"]:
+    if not row["current_flight_id"] or row["booking_status"] == "DISRUPTED":
         return ctx
     first_kept = row["current_flight_id"] == row["original_flight_id"]
     departure = row["current_onward_departure"] if first_kept else row["current_departure"]
@@ -318,26 +378,26 @@ def journey_option_context(ctx, row, departure, final_arrival, first_kept: bool)
 ISSUE_ATTEMPTS = 3
 
 
-async def issue_entitlements(conn, pnr_code: str, actor: str) -> dict | None:
+async def issue_entitlements(conn, pnr_code: str, actor: str, no_alternatives: bool = False) -> dict | None:
     """Evaluate the rules and write the result to vouchers, in one
     transaction. A new voucher code that clashes with an existing one rolls
     the transaction back; it is tried again with fresh codes, so the
     passenger never silently loses their vouchers (issue #16)."""
     for attempt in range(1, ISSUE_ATTEMPTS + 1):
         try:
-            return await _issue_once(conn, pnr_code, actor)
+            return await _issue_once(conn, pnr_code, actor, no_alternatives)
         except asyncpg.UniqueViolationError:
             if attempt == ISSUE_ATTEMPTS:
                 raise
     return None  # pragma: no cover
 
 
-async def _issue_once(conn, pnr_code: str, actor: str) -> dict | None:
+async def _issue_once(conn, pnr_code: str, actor: str, no_alternatives: bool) -> dict | None:
     async with conn.transaction():
         row = await load_booking(conn, pnr_code)
         if row is None:
             return None
-        decision = evaluate(context_from_booking(row))
+        decision = evaluate(context_from_booking(row, no_alternatives=no_alternatives))
         storable = [e for e in decision.entitlements if e.entitlement_type in STORABLE_TYPES]
         for e in storable:
             await conn.execute(

@@ -105,6 +105,11 @@ PROJECT_POLICY = {
     "meal_wait_threshold_hours": 2,  # outside the Regulation's scope
     "goodwill_points": {"BLUE": 1000, "SILVER": 2000, "GOLD": 3000, "PLATINUM": 5000},
     "voucher_validity_hours": 24,
+    # A delay outside the Regulation: the same 5-hour refund point as Art. 6(1)(c)(iii).
+    "refund_delay_hours": 5,
+    # No seat on any later flight and departure within this many hours: the
+    # passenger is stranded overnight, so one hotel night is given now.
+    "stranded_within_hours": 24,
 }
 
 PROJECT_BASIS = "Kestrel project policy (assumption pending Kenya Airways confirmation)"
@@ -125,11 +130,15 @@ class DisruptionContext:
 
     For a journey through Nairobi (migration 015) origin is the first leg's
     origin, destination and the arrivals are those of the FINAL destination,
-    so delay is measured there (kestrel.api.booking._journey_context)."""
+    so delay is measured there (kestrel.api.booking._journey_context).
+
+    A DELAYED flight (migration 016) keeps the booking CONFIRMED: then the
+    scheduled times are the flight's times before the delay, and new_departure
+    and new_arrival are the delayed times."""
 
     pnr_code: str
     rewards_tier: str | None
-    booking_status: str  # DISRUPTED | REACCOMMODATED | CONFIRMED
+    booking_status: str  # DISRUPTED | REACCOMMODATED | CONFIRMED | CANCELLED (refunded)
     origin: str
     destination: str
     scheduled_departure: datetime
@@ -139,6 +148,9 @@ class DisruptionContext:
     new_arrival: datetime | None = None
     notified_at: datetime | None = None  # when the passenger learned of it; default: now
     now: datetime | None = None
+    flight_status: str | None = None  # of the booked flight: CANCELLED | DELAYED | ...
+    # No later flight on the route has a seat in the cabin (a hand-off case is open).
+    no_alternatives: bool = False
 
 
 @dataclass
@@ -247,12 +259,57 @@ def _hours(delta: timedelta) -> float:
 # ---------------------------------------------------------------------------
 
 
+def _meal(ctx: DisruptionContext, regulation: str | None, basis: str, meals: int,
+          explanation: str, valid_until: datetime) -> Entitlement:
+    region = AIRPORTS[ctx.origin][3]
+    amount, currency = PROJECT_POLICY["meal_voucher"].get(region, PROJECT_POLICY["meal_voucher"]["default"])
+    return Entitlement(
+        entitlement_type="MEAL",
+        label="Meal voucher",
+        status="ISSUED",
+        rule_id="R2_MEAL",
+        basis=f"{basis}; value: {PROJECT_BASIS}" if regulation else PROJECT_BASIS,
+        explanation=explanation,
+        quantity=meals,
+        amount=float(amount),
+        currency=currency,
+        valid_until=valid_until,
+    )  # fmt: skip
+
+
+def _meals_for(wait_h: float) -> int:
+    return min(PROJECT_POLICY["max_meals"], max(1, math.ceil(wait_h / PROJECT_POLICY["hours_per_meal"])))
+
+
+def _hotel(basis: str, transport_basis: str, nights: int, explanation: str, until: datetime) -> list[Entitlement]:
+    return [
+        Entitlement(entitlement_type="HOTEL", label="Hotel accommodation", status="ISSUED", rule_id="R3_HOTEL",
+                    basis=basis, explanation=explanation, quantity=nights, valid_until=until),
+        Entitlement(entitlement_type="TRANSPORT", label="Airport-hotel transfer", status="ISSUED",
+                    rule_id="R3_TRANSPORT", basis=transport_basis,
+                    explanation="Return transfer between the airport and the hotel.", quantity=1, valid_until=until),
+    ]  # fmt: skip
+
+
+def _refund(basis: str, explanation: str) -> Entitlement:
+    return Entitlement(
+        entitlement_type="REFUND",
+        label="Refund instead of travelling",
+        status="INFO",
+        rule_id="R6_REFUND",
+        basis=basis,
+        explanation=explanation,
+    )
+
+
 def evaluate(ctx: DisruptionContext) -> EntitlementDecision:
     """Apply every rule to one booking. Deterministic and side-effect free."""
     now = ctx.now or datetime.now(ctx.scheduled_departure.tzinfo)
     decision = EntitlementDecision()
 
-    if ctx.booking_status not in ("DISRUPTED", "REACCOMMODATED"):
+    refunded = ctx.booking_status == "CANCELLED" and ctx.flight_status in ("CANCELLED", "DELAYED")
+    delayed = ctx.flight_status == "DELAYED" and ctx.booking_status in ("CONFIRMED", "CANCELLED")
+    if not (delayed or refunded) and ctx.booking_status not in ("DISRUPTED", "REACCOMMODATED"):
         decision.notes.append("The booking is not affected by a disruption.")
         return decision
 
@@ -267,103 +324,16 @@ def evaluate(ctx: DisruptionContext) -> EntitlementDecision:
     decision.distance_km = km
     reg_label = {"EU261": "EU261", "UK261": "UK261"}.get(regulation or "", "")
 
-    # -- R1 Re-routing -----------------------------------------------------
-    decision.entitlements.append(
-        Entitlement(
-            entitlement_type="REROUTING",
-            label="Re-routing at no extra cost",
-            status="INFO",
-            rule_id="R1_REROUTING",
-            basis=f"{reg_label} Art. 5(1)(a), Art. 8(1)(b)" if regulation else PROJECT_BASIS,
-            explanation="A seat on the next available Kenya Airways flight on the same route, "
-            "in the same cabin, without a fare difference.",
-        )
-    )
+    if delayed:
+        _evaluate_delay(ctx, decision, regulation, reg_label, km, band, refunded)
+        return decision
 
-    # Waiting time: from the original departure to the new one. Before the
-    # passenger is rebooked it is not yet known.
-    wait_h = _hours(ctx.new_departure - ctx.scheduled_departure) if ctx.new_departure else None
-    valid_until = ctx.new_departure or (now + timedelta(hours=PROJECT_POLICY["voucher_validity_hours"]))
-
-    # -- R2 Meals (right to care) -----------------------------------------
-    # Under the Regulation a cancellation always triggers care (Art. 5(1)(b)),
-    # with meals "in a reasonable relation to the waiting time" (Art. 9(1)(a)).
-    # Outside it, the project threshold applies.
-    threshold = 0 if regulation else PROJECT_POLICY["meal_wait_threshold_hours"]
-    if wait_h is None or wait_h >= threshold:
-        meals = 1
-        if wait_h is not None:
-            meals = min(
-                PROJECT_POLICY["max_meals"],
-                max(1, math.ceil(wait_h / PROJECT_POLICY["hours_per_meal"])),
-            )
-        region = AIRPORTS[ctx.origin][3]
-        meal_amount, meal_currency = PROJECT_POLICY["meal_voucher"].get(
-            region, PROJECT_POLICY["meal_voucher"]["default"]
-        )
-        decision.entitlements.append(
-            Entitlement(
-                entitlement_type="MEAL",
-                label="Meal voucher",
-                status="ISSUED",
-                rule_id="R2_MEAL",
-                basis=(f"{reg_label} Art. 5(1)(b), Art. 9(1)(a); value: {PROJECT_BASIS}")
-                if regulation
-                else PROJECT_BASIS,
-                explanation=f"{meals} meal(s) for the wait"
-                + (f" of {wait_h:.1f} hours." if wait_h is not None else " until you are rebooked."),
-                quantity=meals,
-                amount=float(meal_amount),
-                currency=meal_currency,
-                valid_until=valid_until,
-            )
-        )
-    else:
+    if refunded:
         decision.notes.append(
-            f"No meal voucher: the new departure is {wait_h:.1f} hours after the original, "
-            f"below the {threshold}-hour threshold."
+            "You cancelled your booking for a refund, so re-routing, meals and hotel no longer apply."
         )
-
-    # -- R3 Hotel and transport -------------------------------------------
-    # Art. 5(1)(b) with Art. 9(1)(b),(c): when the new departure is at least
-    # the day after the planned one, local time at the departure airport.
-    if ctx.new_departure is not None:
-        nights = (
-            _local(ctx.new_departure, ctx.origin).date()
-            - _local(ctx.scheduled_departure, ctx.origin).date()
-        ).days
-        if nights >= 1 and wait_h >= PROJECT_POLICY["min_wait_for_hotel_hours"]:
-            basis = f"{reg_label} Art. 5(1)(b), Art. 9(1)(b)" if regulation else PROJECT_BASIS
-            decision.entitlements.append(
-                Entitlement(
-                    entitlement_type="HOTEL",
-                    label="Hotel accommodation",
-                    status="ISSUED",
-                    rule_id="R3_HOTEL",
-                    basis=basis,
-                    explanation=f"{nights} night(s): your new flight leaves on a later day.",
-                    quantity=nights,
-                    valid_until=ctx.new_departure,
-                )
-            )
-            decision.entitlements.append(
-                Entitlement(
-                    entitlement_type="TRANSPORT",
-                    label="Airport-hotel transfer",
-                    status="ISSUED",
-                    rule_id="R3_TRANSPORT",
-                    basis=f"{reg_label} Art. 9(1)(c)" if regulation else PROJECT_BASIS,
-                    explanation="Return transfer between the airport and the hotel.",
-                    quantity=1,
-                    valid_until=ctx.new_departure,
-                )
-            )
-        else:
-            decision.notes.append(
-                "No hotel: your new flight leaves the same day or shortly after midnight."
-            )
     else:
-        decision.notes.append("Hotel accommodation is decided once you are rebooked.")
+        _care_after_cancellation(ctx, decision, regulation, reg_label, now)
 
     reason = ctx.disruption_reason
     controllable = reason in CONTROLLABLE_REASONS
@@ -449,3 +419,166 @@ def evaluate(ctx: DisruptionContext) -> EntitlementDecision:
         decision.notes.append("No goodwill points: the cancellation was outside the airline's control.")
 
     return decision
+
+
+def _care_after_cancellation(ctx, decision, regulation, reg_label, now) -> None:
+    """R1 re-routing, R2 meals, R3 hotel and transport, R6 refund, for a cancelled flight."""
+    # -- R1 Re-routing -----------------------------------------------------
+    decision.entitlements.append(
+        Entitlement(
+            entitlement_type="REROUTING",
+            label="Re-routing at no extra cost",
+            status="INFO",
+            rule_id="R1_REROUTING",
+            basis=f"{reg_label} Art. 5(1)(a), Art. 8(1)(b)" if regulation else PROJECT_BASIS,
+            explanation="A seat on the next available Kenya Airways flight on the same route, "
+            "in the same cabin, without a fare difference.",
+        )
+    )
+    # -- R6 Refund instead (Art. 8(1)(a)), while not yet rebooked -----------
+    if ctx.booking_status == "DISRUPTED":
+        decision.entitlements.append(
+            _refund(
+                f"{reg_label} Art. 5(1)(a), Art. 8(1)(a)" if regulation else PROJECT_BASIS,
+                "If you no longer want to travel, you can cancel and have your ticket refunded.",
+            )
+        )
+
+    # Waiting time: from the original departure to the new one. Before the
+    # passenger is rebooked it is not yet known.
+    wait_h = _hours(ctx.new_departure - ctx.scheduled_departure) if ctx.new_departure else None
+    valid_until = ctx.new_departure or (now + timedelta(hours=PROJECT_POLICY["voucher_validity_hours"]))
+
+    # -- R2 Meals (right to care) -----------------------------------------
+    # Under the Regulation a cancellation always triggers care (Art. 5(1)(b)),
+    # with meals "in a reasonable relation to the waiting time" (Art. 9(1)(a)).
+    # Outside it, the project threshold applies.
+    threshold = 0 if regulation else PROJECT_POLICY["meal_wait_threshold_hours"]
+    if wait_h is None or wait_h >= threshold:
+        meals = 1 if wait_h is None else _meals_for(wait_h)
+        decision.entitlements.append(
+            _meal(
+                ctx, regulation, f"{reg_label} Art. 5(1)(b), Art. 9(1)(a)", meals,
+                f"{meals} meal(s) for the wait"
+                + (f" of {wait_h:.1f} hours." if wait_h is not None else " until you are rebooked."),
+                valid_until,
+            )
+        )  # fmt: skip
+    else:
+        decision.notes.append(
+            f"No meal voucher: the new departure is {wait_h:.1f} hours after the original, "
+            f"below the {threshold}-hour threshold."
+        )
+
+    # -- R3 Hotel and transport -------------------------------------------
+    # Art. 5(1)(b) with Art. 9(1)(b),(c): when the new departure is at least
+    # the day after the planned one, local time at the departure airport.
+    hotel_basis = f"{reg_label} Art. 5(1)(b), Art. 9(1)(b)" if regulation else PROJECT_BASIS
+    transport_basis = f"{reg_label} Art. 9(1)(c)" if regulation else PROJECT_BASIS
+    if ctx.new_departure is not None:
+        nights = (
+            _local(ctx.new_departure, ctx.origin).date()
+            - _local(ctx.scheduled_departure, ctx.origin).date()
+        ).days
+        if nights >= 1 and wait_h >= PROJECT_POLICY["min_wait_for_hotel_hours"]:
+            decision.entitlements += _hotel(
+                hotel_basis, transport_basis, nights,
+                f"{nights} night(s): your new flight leaves on a later day.", ctx.new_departure,
+            )  # fmt: skip
+        else:
+            decision.notes.append(
+                "No hotel: your new flight leaves the same day or shortly after midnight."
+            )
+    elif ctx.no_alternatives and _hours(ctx.scheduled_departure - now) <= PROJECT_POLICY["stranded_within_hours"]:
+        # No later flight has a seat: the passenger cannot leave before tomorrow.
+        decision.entitlements += _hotel(
+            hotel_basis, transport_basis, 1,
+            "1 night: no other flight has a seat left, so you cannot travel today. "
+            "A member of staff is finding you a flight.", valid_until,
+        )  # fmt: skip
+    else:
+        decision.notes.append("Hotel accommodation is decided once you are rebooked.")
+
+
+def _evaluate_delay(ctx, decision, regulation, reg_label, km, band, refunded) -> None:
+    """A DELAYED flight (Art. 6): the booking keeps its seat, so there is no
+    re-routing; care from 2/3/4 hours by distance (the project's 2 hours
+    outside the Regulation), a refund from 5 hours, and compensation when the
+    arrival is 3 hours or more late (CJEU C-402/07 Sturgeon)."""
+    if ctx.new_departure is None:
+        decision.notes.append("Your flight is delayed; how long is not recorded yet.")
+        return
+    delay_h = _hours(ctx.new_departure - ctx.scheduled_departure)
+    decision.notes.append(
+        f"Your flight is delayed by {delay_h:.1f} hours, not cancelled: you keep your seat, "
+        "and a free change to another flight is not offered for a delay."
+    )
+    if not refunded:
+        threshold = (2, 3, 4)[band] if regulation else PROJECT_POLICY["meal_wait_threshold_hours"]
+        art6 = f"{reg_label} Art. 6(1)({'abc'[band]})" if regulation else PROJECT_BASIS
+        if delay_h >= threshold:
+            meals = _meals_for(delay_h)
+            decision.entitlements.append(
+                _meal(ctx, regulation, f"{art6}, Art. 9(1)(a)", meals,
+                      f"{meals} meal(s) for a delay of {delay_h:.1f} hours.", ctx.new_departure)
+            )  # fmt: skip
+            nights = (
+                _local(ctx.new_departure, ctx.origin).date() - _local(ctx.scheduled_departure, ctx.origin).date()
+            ).days
+            if nights >= 1 and delay_h >= PROJECT_POLICY["min_wait_for_hotel_hours"]:
+                decision.entitlements += _hotel(
+                    f"{art6}(ii), Art. 9(1)(b)" if regulation else PROJECT_BASIS,
+                    f"{reg_label} Art. 9(1)(c)" if regulation else PROJECT_BASIS,
+                    nights, f"{nights} night(s): your flight now leaves on a later day.", ctx.new_departure,
+                )  # fmt: skip
+        else:
+            decision.notes.append(
+                f"No meal voucher: the delay is below the {threshold}-hour threshold for this route."
+            )
+        if delay_h >= PROJECT_POLICY["refund_delay_hours"]:
+            decision.entitlements.append(
+                _refund(
+                    f"{reg_label} Art. 6(1)(c)(iii), Art. 8(1)(a)" if regulation else PROJECT_BASIS,
+                    "Your flight is delayed by 5 hours or more: if you no longer want to travel, "
+                    "you can cancel and have your ticket refunded.",
+                )
+            )
+
+    reason = ctx.disruption_reason
+    late_h = _hours(ctx.new_arrival - ctx.scheduled_arrival) if ctx.new_arrival and ctx.scheduled_arrival else None
+    if regulation is None:
+        decision.notes.append(
+            "No cash compensation under EU261/UK261: the flight does not depart from the "
+            "EU or UK, and Kenya Airways is not a Community carrier (Art. 3(1))."
+        )
+    elif reason in EXTRAORDINARY_REASONS:
+        decision.notes.append(
+            f"No cash compensation: the delay was caused by {reason.lower()}, an "
+            f"extraordinary circumstance ({reg_label} Art. 5(3))."
+        )
+    elif reason not in CONTROLLABLE_REASONS or late_h is None:
+        decision.notes.append("Cash compensation for this delay will be assessed by a member of staff.")
+    elif late_h < 3:
+        decision.notes.append(
+            f"No cash compensation: you arrive {late_h:.1f} hours late, under the 3 hours "
+            "that gives compensation for a delay."
+        )
+    else:
+        table = COMPENSATION[regulation]
+        amount = table["bands"][band]
+        # Art. 7(2)(c), as Sturgeon applies it: halved on the longest routes under 4 hours late.
+        reduced = band == 2 and late_h < 4
+        decision.entitlements.append(
+            Entitlement(
+                entitlement_type="CASH_COMPENSATION",
+                label="Cash compensation",
+                status="ELIGIBLE",
+                rule_id="R4_COMPENSATION",
+                basis=f"{reg_label} Art. 6, Art. 7(1){', Art. 7(2)' if reduced else ''}; CJEU C-402/07 Sturgeon",
+                explanation=f"{km:,} km route, arriving {late_h:.1f} hours late"
+                + (" (halved)." if reduced else ".")
+                + " Paid by Kenya Airways customer care after review.",
+                amount=float(amount / 2 if reduced else amount),
+                currency=table["currency"],
+            )
+        )

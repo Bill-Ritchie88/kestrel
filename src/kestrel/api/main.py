@@ -77,10 +77,21 @@ from kestrel.api.booking import (
     load_booking,
     voucher_to_dict,
 )
+from kestrel.api.claims import (
+    SQL_APPROVE,
+    SQL_CANCEL_FOR_REFUND,
+    SQL_CLAIM_STATUS,
+    SQL_CLAIMS_FOR_PNR,
+    SQL_INSERT_CLAIM,
+    SQL_LIST_CLAIMS,
+    SQL_PAY,
+    SQL_REJECT,
+    claim_to_dict,
+)
 from kestrel.api.explain import explain_alternatives
 from kestrel.api.journeys import LEG_CANDIDATES, SQL_JOURNEY_LEGS, build_journeys, find_journey
 from kestrel.api.timing import RequestTimingMiddleware
-from kestrel.entitlements import evaluate, local_iso
+from kestrel.entitlements import PROJECT_BASIS, evaluate, local_iso
 from kestrel.handoff import (
     PASSENGER_TRIGGERS,
     SQL_LIST_BY_STATUS,
@@ -391,6 +402,21 @@ class ChatTurnRequest(BaseModel):
 class ResolveRequest(BaseModel):
     resolved_by: str = Field(..., min_length=1, max_length=80)
     note: str = Field(..., min_length=1, max_length=2000)
+
+
+class ClaimDecision(BaseModel):
+    """Staff only (migration 016). `by` is the member of staff's name."""
+
+    by: str = Field(..., min_length=1, max_length=80)
+
+
+class RejectRequest(ClaimDecision):
+    reason: str = Field(..., min_length=1, max_length=1000)
+
+
+class PayRequest(ClaimDecision):
+    # Recorded only: no money moves through Kestrel.
+    payout_reference: str = Field(..., min_length=1, max_length=80)
 
 
 # ---------------------------------------------------------------------------
@@ -747,30 +773,56 @@ async def trip(
     four. The entitlement decision is computed from the booking row, with no
     further query.
     """
-    booking, alternatives, legs, vouchers, cases = await asyncio.gather(
+    booking, alternatives, legs, vouchers, cases, claims = await asyncio.gather(
         _fetchrow(pool, SQL_LOAD_BOOKING, session.pnr_code),
         _fetch(pool, SQL_FIND_ALTERNATIVES, session.pnr_code, TRIP_ALTERNATIVES),
         _fetch(pool, SQL_JOURNEY_LEGS, session.pnr_code, LEG_CANDIDATES),
         _fetch(pool, SQL_VOUCHERS, session.pnr_code),
         _fetch(pool, SQL_LIST_FOR_PNR, session.pnr_code),
+        _fetch(pool, SQL_CLAIMS_FOR_PNR, session.pnr_code),
     )
     if booking is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found.")
     booking_body = booking_to_dict(booking)
     case_bodies = [case_to_dict(r) for r in cases]
+    voucher_bodies = [voucher_to_dict(v) for v in vouchers]
+    options = _options(booking, alternatives, legs, TRIP_ALTERNATIVES)
+    if booking["booking_status"] == "DISRUPTED" and not options and not _stranded(case_bodies):
+        # No seat left on any later flight: a person takes over (FR-05), and a
+        # passenger stranded overnight gets a hotel now, not after rebooking.
+        async with pool.acquire() as conn:
+            try:
+                case = await open_case(
+                    conn, pnr_code=session.pnr_code, trigger="NO_ALTERNATIVES", actor="SYSTEM",
+                    summary="No later flight on the route has a seat left in the passenger's cabin.",
+                )  # fmt: skip
+            except LookupError:
+                case = None
+            if case is not None:
+                case_bodies.insert(0, case)
+                issued = await issue_entitlements(conn, session.pnr_code, "SYSTEM", no_alternatives=True)
+                voucher_bodies = issued["vouchers"] if issued else voucher_bodies
     return {
         "pnr_code": session.pnr_code,
         "booking": booking_body,
-        "alternatives": _options(booking, alternatives, legs, TRIP_ALTERNATIVES),
+        "alternatives": options,
         "entitlements": {
-            "decision": evaluate(context_from_booking(booking)).to_dict(),
-            "vouchers": [voucher_to_dict(v) for v in vouchers],
+            "decision": evaluate(
+                context_from_booking(booking, no_alternatives=_stranded(case_bodies))
+            ).to_dict(),
+            "vouchers": voucher_bodies,
         },
+        "claims": [claim_to_dict(c) for c in claims],
         "cases": case_bodies,
         "suggestions": suggestions(booking_body, case_bodies),
         # Airport names for the client (kestrel.airports, the one list).
         "cities": cities_for(booking["origin"], booking["destination"], booking_body["final_destination"]),
     }
+
+
+def _stranded(cases: list[dict]) -> bool:
+    """An open NO_ALTERNATIVES case: no later flight had a seat when it was opened."""
+    return any(c["trigger"] == "NO_ALTERNATIVES" and c["status"] == "OPEN" for c in cases)
 
 
 @app.post("/api/reaccommodate/proposal")
@@ -1010,13 +1062,15 @@ async def get_entitlements(
     for anything that does not apply, plus the vouchers already issued. The
     two reads are independent, so they run at once on two connections (the
     same answer as before, in one query's time)."""
-    booking, vouchers = await asyncio.gather(
+    booking, vouchers, cases = await asyncio.gather(
         _fetchrow(pool, SQL_LOAD_BOOKING, session.pnr_code),
         _fetch(pool, SQL_VOUCHERS, session.pnr_code),
+        _fetch(pool, SQL_LIST_FOR_PNR, session.pnr_code),
     )
     if booking is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found.")
-    decision = evaluate(context_from_booking(booking))
+    stranded = _stranded([case_to_dict(c) for c in cases])
+    decision = evaluate(context_from_booking(booking, no_alternatives=stranded))
     return {
         "pnr_code": session.pnr_code,
         "decision": decision.to_dict(),
@@ -1032,6 +1086,142 @@ async def list_vouchers(
     async with pool.acquire() as conn:
         rows = await conn.fetch(SQL_VOUCHERS, session.pnr_code)
     return {"pnr_code": session.pnr_code, "vouchers": [voucher_to_dict(r) for r in rows]}
+
+
+# ---------------------------------------------------------------------------
+# Compensation claims and refunds (migration 016)
+# ---------------------------------------------------------------------------
+
+
+def _refuse(reason: str, detail: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT, detail=detail, headers={"X-Refusal-Reason": reason}
+    )
+
+
+@app.post("/api/compensation/claim", status_code=status.HTTP_201_CREATED)
+async def claim_compensation(
+    session: PassengerSession = Depends(current_passenger),
+    pool: asyncpg.Pool = Depends(db.get_pool),
+):
+    """The passenger claims the cash compensation the rules give (R4). The
+    amount and rule come from evaluate() here, never from the request."""
+    async with pool.acquire() as conn:
+        booking = await load_booking(conn, session.pnr_code)
+        if booking is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found.")
+        if booking["booking_status"] == "DISRUPTED":
+            # Art. 7(2): the amount depends on when the new flight arrives.
+            raise _refuse(
+                "CHOOSE_FLIGHT_FIRST",
+                "The amount depends on your new flight: choose one first, or cancel for a refund.",
+            )
+        decision = evaluate(context_from_booking(booking))
+        cash = next((e for e in decision.entitlements if e.entitlement_type == "CASH_COMPENSATION"), None)
+        if cash is None:
+            raise _refuse(
+                "NO_COMPENSATION",
+                " ".join(["The rules give no cash compensation for this booking.",
+                          *[n for n in decision.notes if "compensation" in n][:1]]),
+            )
+        row = await conn.fetchrow(
+            SQL_INSERT_CLAIM, session.pnr_code, cash.amount, cash.currency, cash.rule_id, cash.basis,
+            session.audit_actor(),
+        )  # fmt: skip
+    if row is None:
+        raise _refuse("ALREADY_CLAIMED", "You have already claimed compensation for this booking.")
+    return claim_to_dict(row)
+
+
+@app.post("/api/booking/cancel")
+async def cancel_for_refund(
+    session: PassengerSession = Depends(current_passenger),
+    pool: asyncpg.Pool = Depends(db.get_pool),
+):
+    """"Cancel and request a refund" (Art. 8(1)(a)): cancel_booking_for_refund
+    checks and changes everything under the booking's row lock, and opens a
+    REFUND claim for staff. Refused once rebooked or once the flight has left."""
+    async with pool.acquire() as conn:
+        booking = await load_booking(conn, session.pnr_code)
+        if booking is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found.")
+        refund = next(
+            (e for e in evaluate(context_from_booking(booking)).entitlements if e.entitlement_type == "REFUND"),
+            None,
+        )
+        result = await conn.fetchrow(
+            SQL_CANCEL_FOR_REFUND, session.pnr_code, session.audit_actor(), refund.basis if refund else PROJECT_BASIS
+        )
+        if result is None or not result["success"]:
+            raise _refuse(
+                result["reason"] if result else "REFUND_FAILED",
+                result["message"] if result else "The booking could not be cancelled.",
+            )
+        # Care vouchers no longer apply; compensation, if any, stays claimable.
+        try:
+            issued = await issue_entitlements(conn, session.pnr_code, session.audit_actor())
+        except asyncpg.PostgresError as exc:
+            print(f"[WARN] Entitlements not refreshed for {session.pnr_code}: {exc}")
+            issued = None
+        booking = await load_booking(conn, session.pnr_code)
+        claims = await conn.fetch(SQL_CLAIMS_FOR_PNR, session.pnr_code)
+    return {
+        "success": True,
+        "message": result["message"],
+        "claim_id": result["claim_id"],
+        "booking": booking_to_dict(booking) if booking else None,
+        "claims": [claim_to_dict(c) for c in claims],
+        "entitlements": issued,
+    }
+
+
+@app.get("/api/staff/claims")
+async def staff_claims(
+    status_filter: Literal["CLAIMED", "APPROVED", "REJECTED", "PAID", "ALL"] = Query("ALL", alias="status"),
+    limit: int = Query(200, ge=1, le=500),
+    _: str = Depends(require_staff),
+    pool: asyncpg.Pool = Depends(db.get_pool),
+):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(SQL_LIST_CLAIMS, None if status_filter == "ALL" else status_filter, limit)
+    return {"count": len(rows), "claims": [claim_to_dict(r) for r in rows]}
+
+
+async def _move_claim(pool, sql: str, claim_id: int, *args, verb: str) -> dict:
+    async with pool.acquire() as conn:
+        try:
+            row = await conn.fetchrow(sql, claim_id, *args)
+        except asyncpg.CheckViolationError as exc:  # the database's own guard
+            raise _refuse("INVALID_TRANSITION", str(exc)) from exc
+        if row is None:
+            current = await conn.fetchval(SQL_CLAIM_STATUS, claim_id)
+            if current is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No claim with that id.")
+            raise _refuse("INVALID_TRANSITION", f"This claim is {current.lower()}, so it cannot be {verb}.")
+    return claim_to_dict(row)
+
+
+@app.post("/api/staff/claims/{claim_id}/approve")
+async def approve_claim(
+    claim_id: int, payload: ClaimDecision, _: str = Depends(require_staff), pool: asyncpg.Pool = Depends(db.get_pool)
+):
+    return await _move_claim(pool, SQL_APPROVE, claim_id, f"STAFF:{payload.by}", verb="approved")
+
+
+@app.post("/api/staff/claims/{claim_id}/reject")
+async def reject_claim(
+    claim_id: int, payload: RejectRequest, _: str = Depends(require_staff), pool: asyncpg.Pool = Depends(db.get_pool)
+):
+    return await _move_claim(pool, SQL_REJECT, claim_id, f"STAFF:{payload.by}", payload.reason, verb="rejected")
+
+
+@app.post("/api/staff/claims/{claim_id}/pay")
+async def pay_claim(
+    claim_id: int, payload: PayRequest, _: str = Depends(require_staff), pool: asyncpg.Pool = Depends(db.get_pool)
+):
+    return await _move_claim(
+        pool, SQL_PAY, claim_id, f"STAFF:{payload.by}", payload.payout_reference, verb="marked paid"
+    )
 
 
 # ---------------------------------------------------------------------------

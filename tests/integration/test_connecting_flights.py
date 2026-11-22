@@ -112,7 +112,8 @@ async def last_audit(conn, pnr):
 async def preview(connection) -> None:
     path = os.getenv("KESTREL_PREVIEW_MIGRATION")
     if path:
-        await connection.execute(Path(path).read_text(encoding="utf-8"))
+        # Several migrations, in order, separated by os.pathsep (015 then 016).
+        await connection.execute("\n".join(Path(p).read_text(encoding="utf-8") for p in path.split(os.pathsep)))
     if not await connection.fetchval(SQL_HAS_JOURNEY):
         pytest.skip("reaccommodate_journey_atomic does not exist: apply or preview migration 015")
 

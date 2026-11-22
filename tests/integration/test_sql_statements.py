@@ -20,7 +20,7 @@ import asyncpg
 import pytest
 
 from kestrel import handoff
-from kestrel.api import accounts, booking, history, journeys, main
+from kestrel.api import accounts, booking, claims, history, journeys, main
 from kestrel.policy import retriever
 
 pytestmark = pytest.mark.integration
@@ -28,7 +28,7 @@ pytestmark = pytest.mark.integration
 STATEMENTS = sorted(
     {
         (f"{module.__name__.rsplit('.', 1)[-1]}.{name}", getattr(module, name))
-        for module in (handoff, booking, main, retriever, accounts, history, journeys)
+        for module in (handoff, booking, main, retriever, accounts, history, journeys, claims)
         for name in dir(module)
         if name.startswith("SQL_") and isinstance(getattr(module, name), str)
     }
@@ -43,7 +43,8 @@ async def conn():
     try:
         preview = os.getenv("KESTREL_PREVIEW_MIGRATION")
         if preview:
-            await connection.execute(Path(preview).read_text(encoding="utf-8"))
+            # Several migrations, in order, separated by os.pathsep (015 then 016).
+            await connection.execute("\n".join(Path(p).read_text(encoding="utf-8") for p in preview.split(os.pathsep)))
         yield connection
     finally:
         await transaction.rollback()
@@ -70,4 +71,8 @@ async def test_statement_prepares_against_the_live_schema(conn, name, sql):
         "WHERE table_name = 'pnr_bookings' AND column_name = 'onward_flight_id'"
     ):
         pytest.skip("pnr_bookings.onward_flight_id does not exist yet: apply migration 015")
+    if any(w in sql for w in ("scheduled_departure_time", "compensation_claims", "cancel_booking_for_refund")) and (
+        not await conn.fetchval("SELECT to_regclass('public.compensation_claims')")
+    ):
+        pytest.skip("compensation_claims does not exist yet: apply migration 016")
     await conn.prepare(sql)

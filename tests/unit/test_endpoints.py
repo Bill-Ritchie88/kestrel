@@ -515,7 +515,9 @@ def test_trip_returns_every_panel_in_the_shapes_of_the_single_endpoints(client, 
     conn.routes["FROM handoff_cases WHERE pnr_code"] = [CASE]
     body = client.get("/api/trip", headers=token).json()
 
-    assert set(body) == {"pnr_code", "booking", "alternatives", "entitlements", "cases", "suggestions", "cities"}
+    assert set(body) == {
+        "pnr_code", "booking", "alternatives", "entitlements", "claims", "cases", "suggestions", "cities"
+    }
     assert body["booking"] == client.get("/api/me", headers=token).json()
     assert body["alternatives"][0]["flight_id"] == "f-alt"
     assert body["alternatives"][0]["departure_local"]  # local time, as /api/flights/alternatives
@@ -560,7 +562,7 @@ def test_trip_runs_its_queries_at_once_on_separate_connections(token):
         assert TestClient(main.app).get("/api/trip", headers=token).status_code == 200
     finally:
         main.app.dependency_overrides.clear()
-    assert pool.most == 5  # booking, alternatives, journey legs (015), vouchers, cases
+    assert pool.most == 6  # booking, alternatives, journey legs (015), vouchers, cases, claims (016)
 
 
 def test_large_responses_are_gzipped(client, conn, token):

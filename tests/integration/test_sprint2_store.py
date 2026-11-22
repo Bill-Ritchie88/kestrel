@@ -23,7 +23,8 @@ async def conn():
     try:
         preview = os.getenv("KESTREL_PREVIEW_MIGRATION")
         if preview:
-            await connection.execute(Path(preview).read_text(encoding="utf-8"))
+            # Several migrations, in order, separated by os.pathsep (015 then 016).
+            await connection.execute("\n".join(Path(p).read_text(encoding="utf-8") for p in preview.split(os.pathsep)))
         yield connection
     finally:
         await transaction.rollback()
@@ -56,11 +57,8 @@ async def rebooked(conn):
 
 
 async def test_entitlements_are_written_once_per_type(conn, rebooked):
-    if not await conn.fetchval(
-        "SELECT 1 FROM information_schema.columns "
-        "WHERE table_name = 'pnr_bookings' AND column_name = 'onward_flight_id'"
-    ):
-        pytest.skip("load_booking reads pnr_bookings.onward_flight_id: apply migration 015")
+    if not await conn.fetchval("SELECT to_regclass('public.compensation_claims')"):
+        pytest.skip("load_booking reads the onward leg (015) and scheduled times (016): apply both")
     first = await issue_entitlements(conn, rebooked, "PYTEST")
     second = await issue_entitlements(conn, rebooked, "PYTEST")
     types_ = [v["entitlement_type"] for v in second["vouchers"]]

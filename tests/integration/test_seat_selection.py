@@ -123,7 +123,8 @@ async def conn():
         preview = os.getenv("KESTREL_PREVIEW_MIGRATION")
         if preview:
             # One multi-statement execute: inside this transaction, rolled back below.
-            await connection.execute(Path(preview).read_text(encoding="utf-8"))
+            # Several migrations, in order, separated by os.pathsep (015 then 016).
+            await connection.execute("\n".join(Path(p).read_text(encoding="utf-8") for p in preview.split(os.pathsep)))
         if not await connection.fetchval(SQL_HAS_SEAT_PARAMETER):
             pytest.skip("reaccommodate_passenger_atomic has no p_seat_id: apply migration 013")
         yield connection
