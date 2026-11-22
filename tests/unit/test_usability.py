@@ -171,3 +171,57 @@ def test_cleanup_selects_only_by_fixed_markers(ub):
     tables = [re.search(r"(?:FROM|UPDATE)\s+(\w+)", sql).group(1) for sql, _ in statements]
     assert tables.index("pnr_bookings") < tables.index("passengers") < tables.index("flights")
     assert tables[0] == "seats" and tables[-1] == "flights"
+
+
+# -- Connecting-flight demo bookings (migration 015) --------------------------
+
+
+@pytest.fixture(scope="module")
+def cb():
+    import sys
+
+    sys.path.insert(0, str(SCRIPTS / "data"))
+    return _load("create_connecting_bookings", SCRIPTS / "data" / "create_connecting_bookings.py")
+
+
+def _route(o, d, later=5, free=50, aircraft="738"):
+    return {"origin": o, "destination": d, "aircraft": aircraft, "later_flights": later, "free_economy": free}
+
+
+def test_the_journey_is_the_pair_with_most_later_flights_on_its_thinner_leg(cb):
+    candidates = [_route("MBA", "NBO", later=8), _route("NBO", "EBB", later=4), _route("KIS", "NBO", later=3),
+                  _route("NBO", "MBA", later=9), _route("NBO", "DAR", later=2)]  # fmt: skip
+    first, onward = cb.choose_journey(candidates, protected=set())
+    # MBA-NBO-MBA is a round trip, never chosen; MBA-NBO-EBB beats KIS (3) and DAR (2).
+    assert (first["origin"], onward["destination"]) == ("MBA", "EBB")
+
+
+def test_protected_and_thin_routes_are_never_chosen(cb):
+    candidates = [_route("MBA", "NBO"), _route("NBO", "EBB"), _route("NBO", "DAR", later=1)]
+    assert cb.choose_journey(candidates, protected={("NBO", "EBB")}) is None
+
+
+def test_each_passenger_books_a_two_hour_connection_on_their_own_flights(cb):
+    flights = cb.plan_flights(_route("MBA", "NBO", aircraft="E190"), _route("NBO", "EBB"),
+                              datetime(2026, 12, 1, 6, tzinfo=UTC))  # fmt: skip
+    assert [f["number"] for f in flights] == cb.FLIGHT_NUMBERS
+    assert all(n.startswith("KQ09") for n in cb.FLIGHT_NUMBERS)  # never a generator flight number
+    for first, onward in zip(flights[::2], flights[1::2], strict=True):
+        assert (first["destination"], onward["origin"]) == ("NBO", "NBO")
+        assert onward["departure"] - first["arrival"] == timedelta(hours=2)
+
+
+def test_the_delay_leaves_less_than_the_minimum_connection(cb):
+    from kestrel.api.journeys import MIN_CONNECTION
+
+    assert cb.CONNECTION - cb.DELAY < MIN_CONNECTION <= cb.CONNECTION
+    assert "flight_number = $1" in cb.disruption("LEG2_CANCELLED", "KQ0911", "KQ0912")[0]
+    assert cb.disruption("LEG2_CANCELLED", "KQ0911", "KQ0912")[1] == ("KQ0912",)
+
+
+def test_the_connecting_script_never_names_the_protected_bookings(cb):
+    text = (SCRIPTS / "data" / "create_connecting_bookings.py").read_text(encoding="utf-8")
+    for pnr in ("KW8R2M", "KX4T7P", "KR6N3D", "KM9V5H", "KJ2P8W", "KF7L4B", "KH3Q9T", "KD5Z6R",
+                "PN7LQ4", "YWRMG7", "ESN5KX", "YSPWEE", "UL3HW9", "MLCFHE"):  # fmt: skip
+        assert pnr not in text
+    assert not set(cb.FLIGHT_NUMBERS) & {"KQ606", "KQ0901"}

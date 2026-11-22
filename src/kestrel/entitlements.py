@@ -121,7 +121,11 @@ STORABLE_TYPES = frozenset({"MEAL", "HOTEL", "TRANSPORT", "ASANTE_POINTS", "CASH
 
 @dataclass(frozen=True)
 class DisruptionContext:
-    """Everything the rules depend on. All datetimes must be timezone-aware."""
+    """Everything the rules depend on. All datetimes must be timezone-aware.
+
+    For a journey through Nairobi (migration 015) origin is the first leg's
+    origin, destination and the arrivals are those of the FINAL destination,
+    so delay is measured there (kestrel.api.booking._journey_context)."""
 
     pnr_code: str
     rewards_tier: str | None

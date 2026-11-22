@@ -122,6 +122,8 @@ switch ($Target) {
     "reset"    { & $Py scripts/data/reset_demo.py }
     "usability" { & $Py scripts/data/create_usability_bookings.py }
     "usability-cleanup" { & $Py scripts/data/create_usability_bookings.py --cleanup }
+    "connecting" { & $Py scripts/data/create_connecting_bookings.py }
+    "connecting-cleanup" { & $Py scripts/data/create_connecting_bookings.py --cleanup }
     "api"      { & $Py -m uvicorn kestrel.api.main:app --reload }
     "agent-api" { & $Py -m uvicorn kestrel.agent_service:app --port 8001 --reload }
     "web"      { Invoke-Web }
@@ -158,6 +160,8 @@ switch ($Target) {
             @("reset",    "Reset the demo data to now"),
             @("usability", "Create or refresh the six usability-test bookings (prints references)"),
             @("usability-cleanup", "Remove the usability-test flight, passengers and bookings"),
+            @("connecting", "Create or refresh three connecting-flight demo bookings (needs migration 015)"),
+            @("connecting-cleanup", "Remove the connecting-flight demo flights, passengers and bookings"),
             @("api",      "Run the REST tier with reload"),
             @("agent-api","Run the agent service (Flutter chat) on :8001"),
             @("web",      "Release build of the website, served on http://localhost:8080"),
