@@ -307,3 +307,63 @@ def test_the_prompt_version_is_semver_plus_a_hash_of_the_prompt():
 def test_every_turn_reports_its_prompt_version(rest):
     result = agent.run_agent("Hi", llm=ScriptedLLM([AIMessage(content="Hello.")]))
     assert result.to_dict()["prompt_version"] == agent.PROMPT_VERSION
+
+
+# -- Connecting journeys through Nairobi (migration 015) ---------------------
+
+JOURNEY = {
+    "flight_id": "first-id", "flight_number": "KQ601", "origin": "MBA", "destination": "NBO",
+    "departure_local": "2026-12-01T09:00+03:00", "arrival_local": "2026-12-01T10:00+03:00",
+    "cabin_class": "ECONOMY", "available_seats": 9, "kept": False, "final_destination": "EBB",
+    "connection_minutes": 90,
+    "onward": {"flight_id": "onward-id", "flight_number": "KQ412", "departure_local": "2026-12-01T11:30+03:00",
+               "arrival_local": "2026-12-01T12:40+03:00", "kept": False},
+}  # fmt: skip
+
+
+def test_journey_options_reach_the_model_with_both_flights(monkeypatch):
+    tier = RestTier(alternatives={"pnr_code": "7J0001", "count": 1, "alternatives": [JOURNEY]})
+    monkeypatch.setattr(agent, "http_client", httpx.Client(transport=httpx.MockTransport(tier)))
+    agent.bind_token(TOKEN)
+    (option,) = json.loads(agent.find_alternative_flights_tool.invoke({}))["alternatives"]
+    assert option["onward"]["flight_id"] == "onward-id" and option["final_destination"] == "EBB"
+
+
+def test_a_journey_is_proposed_with_both_flight_ids(monkeypatch):
+    sent = []
+
+    def handler(request):
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json={"flight": JOURNEY, "seat_id": None,
+                                         "confirmation_token": CONFIRMATION_TOKEN, "expires_in": 300})  # fmt: skip
+
+    monkeypatch.setattr(agent, "http_client", httpx.Client(transport=httpx.MockTransport(handler)))
+    agent.bind_token(TOKEN)
+    out = json.loads(agent.reaccommodate_passenger_tool.invoke(
+        {"target_flight_id": "first-id", "onward_flight_id": "onward-id"}))  # fmt: skip
+    assert sent == [{"target_flight_id": "first-id", "onward_flight_id": "onward-id"}]
+    assert out["status"] == "CONFIRMATION_REQUIRED" and out["onward_flight_number"] == "KQ412"
+
+
+def test_the_briefing_explains_the_missed_connection_and_lists_journeys():
+    trip = {
+        "booking": {
+            "pnr_code": "7J0001", "booking_status": "DISRUPTED", "final_destination": "EBB",
+            "original_flight": {"flight_number": "KQ603", "origin": "MBA", "destination": "NBO", "status": "CANCELLED"},
+            "legs": [
+                {"leg": 1, "flight_number": "KQ603", "origin": "MBA", "destination": "NBO", "leg_status": "CANCELLED"},
+                {"leg": 2, "flight_number": "KQ410", "origin": "NBO", "destination": "EBB",
+                 "leg_status": "MISSED_CONNECTION"},
+            ],
+        },
+        "alternatives": [JOURNEY],
+    }  # fmt: skip
+    text = agent.briefing_text(trip)
+    assert "Connection in Nairobi" in text and "missed connection" in text
+    assert "flight_id=first-id" in text and "onward_flight_id=onward-id" in text
+    assert agent.PROMPT_SEMVER == "2.2.0" and "connection in Nairobi" in agent.SYSTEM_PROMPT
+
+
+def test_the_quick_reply_names_the_affected_connection():
+    reply = agent._alternatives_reply({"status": "OK"}, {"alternatives": [JOURNEY]})
+    assert "connection in Nairobi is affected" in reply and "KQ601 then KQ412" in reply

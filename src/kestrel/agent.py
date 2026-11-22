@@ -34,6 +34,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_core.tools import tool
 
 from kestrel import config  # noqa: F401  - loads .env before anything reads it
+from kestrel.airports import city as _city
 from kestrel.entitlements import when_text
 
 FASTAPI_BASE_URL = os.getenv("FASTAPI_BASE_URL", "http://127.0.0.1:8000")
@@ -172,8 +173,10 @@ def find_alternative_flights_tool() -> str:
     """
     Lists the recovery flights available to the authenticated passenger on the
     same route and in the same cabin, earliest arrival first, with flight IDs,
-    departure and arrival times and seats left. Call this FIRST whenever a
-    passenger asks to be rebooked. Takes no arguments.
+    departure and arrival times and seats left. For a passenger with a
+    connection in Nairobi each option is a whole journey: the first flight plus
+    an `onward` flight to the final destination, earliest final arrival first.
+    Call this FIRST whenever a passenger asks to be rebooked. Takes no arguments.
     """
     try:
         response = http_client.get(
@@ -198,37 +201,58 @@ def find_alternative_flights_tool() -> str:
             )
         # Only what the model needs to choose and to tell the passenger, in
         # local airport time. Fewer tokens is a faster step.
-        compact = [
-            {
-                "flight_id": f["flight_id"],
-                "flight_number": f["flight_number"],
-                "departs_local": f.get("departure_local"),
-                "arrives_local": f.get("arrival_local"),
-                "cabin": f["cabin_class"],
-                "seats_left": f["available_seats"],
-            }
-            for f in data["alternatives"]
-        ]
+        compact = [_compact_option(f) for f in data["alternatives"]]
         return json.dumps({"status": "OK", "alternatives": compact})
     except (httpx.HTTPError, RuntimeError) as exc:
         return json.dumps({"status": "ERROR", "detail": f"Could not reach the backend: {exc}"})
 
 
+def _compact_option(f: dict) -> dict:
+    """Only what the model needs to choose and to tell the passenger, in
+    local airport time. Fewer tokens is a faster step."""
+    option = {
+        "flight_id": f["flight_id"],
+        "flight_number": f["flight_number"],
+        "departs_local": f.get("departure_local"),
+        "arrives_local": f.get("arrival_local"),
+        "cabin": f["cabin_class"],
+        "seats_left": f["available_seats"],
+    }
+    onward = f.get("onward")
+    if onward:  # a journey through Nairobi (migration 015)
+        option["keeps_first_flight"] = f.get("kept", False)
+        option["onward"] = {
+            "flight_id": onward["flight_id"],
+            "flight_number": onward["flight_number"],
+            "departs_local": onward.get("departure_local"),
+            "arrives_local": onward.get("arrival_local"),
+            "kept": onward.get("kept", False),
+        }
+        option["final_destination"] = f.get("final_destination")
+        option["connection_minutes"] = f.get("connection_minutes")
+    return option
+
+
 @tool
-def reaccommodate_passenger_tool(target_flight_id: str) -> str:
+def reaccommodate_passenger_tool(target_flight_id: str, onward_flight_id: str | None = None) -> str:
     """
     Proposes rebooking the authenticated passenger onto a specific recovery
     flight. It changes NOTHING: the passenger is shown a "Confirm rebooking"
-    card and only their tap rebooks them (Kestrel chooses the seat, or they
-    pick one on the seat map). The target_flight_id MUST be copied from
+    card and only their tap rebooks them (Kestrel chooses the seats, or they
+    pick them on the seat map). The target_flight_id MUST be copied from
     CONTEXT or a find_alternative_flights_tool result. Never guess or invent one.
+    For a passenger with a connection, pass the option's onward flight_id as
+    onward_flight_id too: both flights are proposed together.
     """
     try:
         # FR-17: a proposal, never POST /api/reaccommodate. That endpoint
         # refuses this tier without the token only the passenger's tap sends.
+        body = {"target_flight_id": target_flight_id}
+        if onward_flight_id:
+            body["onward_flight_id"] = onward_flight_id
         response = http_client.post(
             f"{FASTAPI_BASE_URL}/api/reaccommodate/proposal",
-            json={"target_flight_id": target_flight_id},
+            json=body,
             headers=_auth_headers(),
         )
         data = response.json()
@@ -236,11 +260,15 @@ def reaccommodate_passenger_tool(target_flight_id: str) -> str:
             # The token goes to the client's card only, never to the model.
             _emit("rebook_proposal", data)
             flight = data.get("flight") or {}
+            onward = flight.get("onward") or {}
             return json.dumps({
                 "status": "CONFIRMATION_REQUIRED",
                 "flight_number": flight.get("flight_number"),
                 "departs_local": flight.get("departure_local"),
                 "arrives_local": flight.get("arrival_local"),
+                **({"onward_flight_number": onward.get("flight_number"),
+                    "onward_departs_local": onward.get("departure_local"),
+                    "final_arrives_local": onward.get("arrival_local")} if onward else {}),
                 "seat": "chosen by Kestrel unless the passenger picks one",
                 "detail": "Nothing has changed yet. Tell the passenger to check the flight and tap "
                 "Confirm rebooking on the card below your reply, or Choose a seat. Do not say "
@@ -248,11 +276,12 @@ def reaccommodate_passenger_tool(target_flight_id: str) -> str:
             })
         _emit("error", {"action": "reaccommodate", "detail": _detail(response)})
         if response.status_code == 404:
-            # Not an alternative (another route, invented, full). Nothing changed.
+            # Not an alternative (another route, invented, full, or one leg of a
+            # journey without its onward flight). Nothing changed.
             return json.dumps({
                 "status": "NOT_AN_OPTION",
                 "detail": _detail(response) + " Offer only flights from CONTEXT or "
-                "find_alternative_flights_tool.",
+                "find_alternative_flights_tool; for a connection, pass both flight_ids.",
             })
         return json.dumps({"status": "FAILED", "detail": _detail(response)})
     except (httpx.HTTPError, RuntimeError, ValueError) as exc:
@@ -372,6 +401,11 @@ SYSTEM_PROMPT = (
     "reporting only the items and amounts given there and why anything does not apply; call "
     "get_entitlements_tool if CONTEXT has none or the booking has changed since.\n"
     "5. If the passenger asks for a person, call escalate_to_human_tool.\n"
+    "6. If CONTEXT shows a connection in Nairobi, the passenger's journey has two flights. "
+    "Explain plainly which leg is affected (cancelled, delayed, or a missed connection because "
+    "the first flight lands too late to catch the second). Each option is a whole journey to "
+    "the final destination: describe both flights and the final arrival, and propose with "
+    "reaccommodate_passenger_tool passing the first flight_id and the onward flight_id.\n"
     "Quote times from the *_local fields or as CONTEXT gives them: they are local time at "
     "that airport. Be brief, warm and concrete. Write plain text: no Markdown, no ** or "
     "other formatting marks."
@@ -380,7 +414,9 @@ SYSTEM_PROMPT = (
 # Provenance (migration 014): every assistant turn is saved with the version of
 # the prompt that produced it. Bump PROMPT_SEMVER when the rules change on
 # purpose; the hash changes by itself with any edit to the text.
-PROMPT_SEMVER = "2.1.0"  # 2.1.0: rule 2, the assistant proposes and the passenger confirms (FR-17)
+# 2.1.0: rule 2, the assistant proposes and the passenger confirms (FR-17)
+# 2.2.0: rule 6, connecting journeys through Nairobi (migration 015)
+PROMPT_SEMVER = "2.2.0"
 
 
 def prompt_version(text: str, semver: str = PROMPT_SEMVER) -> str:
@@ -459,20 +495,48 @@ def briefing_text(trip: dict) -> str:
         + (f" ({original['disruption_reason']})" if original.get("disruption_reason") else "")
         + ".",
     ]
+    legs = booking.get("legs") or []
+    if legs:
+        lines.append(
+            f"Connection in Nairobi: a two-flight journey to {booking.get('final_destination')}. "
+            + " ".join(
+                f"Leg {lg.get('leg')}: {lg.get('flight_number')} {lg.get('origin')}-{lg.get('destination')} "
+                f"departs {_short(lg.get('departure_local'))}, {_LEG_STATUS.get(lg.get('leg_status'), lg.get('leg_status'))}."
+                for lg in legs
+            )
+        )
     if current:
         lines.append(
             f"Now booked on: {current.get('flight_number')}, departs "
             f"{_short(current.get('departure_local'))}, arrives {_short(current.get('arrival_local'))}, "
             f"seat {booking.get('seat_number') or '?'}."
         )
+    onward_now = booking.get("current_onward_flight")
+    if onward_now:
+        lines.append(
+            f"Then: {onward_now.get('flight_number')}, departs {_short(onward_now.get('departure_local'))}, "
+            f"arrives {_short(onward_now.get('arrival_local'))}, seat {booking.get('onward_seat_number') or '?'}."
+        )
     alternatives = (trip.get("alternatives") or [])[:BRIEFING_ALTERNATIVES]
     if alternatives:
-        lines.append("Alternatives, earliest arrival first (flight_id for reaccommodate_passenger_tool):")
+        lines.append(
+            "Journey options, earliest final arrival first (flight_id and onward_flight_id for "
+            "reaccommodate_passenger_tool):"
+            if legs
+            else "Alternatives, earliest arrival first (flight_id for reaccommodate_passenger_tool):"
+        )
         for i, f in enumerate(alternatives, 1):
+            onward = f.get("onward")
             lines.append(
                 f"{i}. {f.get('flight_number')} flight_id={f.get('flight_id')} departs "
-                f"{_short(f.get('departure_local'))} arrives {_short(f.get('arrival_local'))}, "
-                f"{f.get('available_seats')} seats left"
+                f"{_short(f.get('departure_local'))} arrives {_short(f.get('arrival_local'))}"
+                + (
+                    f", then {onward.get('flight_number')} onward_flight_id={onward.get('flight_id')} departs "
+                    f"{_short(onward.get('departure_local'))} arrives {_short(onward.get('arrival_local'))}"
+                    if onward
+                    else ""
+                )
+                + f", {f.get('available_seats')} seats left"
                 + (f"; {'; '.join(f['reasons'])}" if f.get("reasons") else "")
             )
     else:
@@ -487,6 +551,14 @@ def briefing_text(trip: dict) -> str:
             f"#{c.get('case_id')} ({c.get('trigger')})" for c in open_cases
         ))
     return "\n".join(lines)
+
+
+_LEG_STATUS = {
+    "CANCELLED": "cancelled",
+    "DELAYED": "delayed",
+    "MISSED_CONNECTION": "missed connection (the first flight lands too late or was cancelled)",
+    "SCHEDULED": "on schedule",
+}
 
 
 def _context_messages() -> list:
@@ -909,6 +981,14 @@ def _alternatives_reply(output: dict, data: dict | None) -> str:
         return "I couldn't load the flights just now. Please try again in a moment."
     best = flights[0]
     count = len(flights)
+    onward = best.get("onward")
+    if onward:  # a journey through Nairobi (migration 015)
+        return (
+            f"Your connection in Nairobi is affected. Here {'is' if count == 1 else 'are'} {count} "
+            f"journey{'' if count == 1 else 's'} to {_city(best.get('final_destination'))}, earliest "
+            f"arrival first. {best.get('flight_number')} then {onward.get('flight_number')} arrives "
+            f"{_when(onward.get('arrival_local'))}. Choose one to review it; nothing changes until you confirm."
+        )
     return (
         f"Here {'is' if count == 1 else 'are'} {count} flight{'' if count == 1 else 's'} on the "
         f"same route and in your cabin, earliest arrival first. {best.get('flight_number')} on "
