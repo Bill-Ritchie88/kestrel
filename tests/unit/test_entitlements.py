@@ -252,3 +252,11 @@ def test_the_booking_query_reads_cancelled_at():
     from kestrel.api.booking import SQL_LOAD_BOOKING
 
     assert "o.cancelled_at" in SQL_LOAD_BOOKING
+
+
+def test_an_earlier_new_flight_has_no_negative_wait_in_the_meal_note():
+    # Seen live 22 Nov: rebooked onto a flight days before the cancelled one.
+    notes = evaluate(ctx(origin="NBO", destination="MBA", delay_h=-185.5)).notes
+    meal = next(n for n in notes if n.startswith("No meal voucher"))
+    assert "leaves before your original one" in meal
+    assert "-" not in meal.split(":", 1)[1]

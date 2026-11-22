@@ -466,7 +466,9 @@ def _care_after_cancellation(ctx, decision, regulation, reg_label, now) -> None:
         )  # fmt: skip
     else:
         decision.notes.append(
-            f"No meal voucher: the new departure is {wait_h:.1f} hours after the original, "
+            "No meal voucher: your new flight leaves before your original one, so there is no wait."
+            if wait_h < 0
+            else f"No meal voucher: the new departure is {wait_h:.1f} hours after the original, "
             f"below the {threshold}-hour threshold."
         )
 
