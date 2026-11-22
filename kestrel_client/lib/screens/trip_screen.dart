@@ -7,6 +7,7 @@ import '../state/trip.dart';
 import '../theme.dart';
 import '../widgets/api_error.dart';
 import '../widgets/cards.dart';
+import '../widgets/claims.dart';
 import '../widgets/common.dart';
 import '../widgets/layout.dart';
 import '../state/recommend.dart';
@@ -90,6 +91,22 @@ class _TripScreenState extends State<TripScreen> {
           TripTicket(booking: booking),
           const SizedBox(height: K.s6),
           ..._nextStep(trip, shell),
+          if (booking.refundable) ...[
+            const SizedBox(height: K.s4),
+            Text('Rather not travel? You can cancel and have your ticket refunded.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: K.textSecondary)),
+            const SizedBox(height: K.s2),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: SecondaryButton(
+                label: 'Cancel and request a refund',
+                icon: Icons.undo,
+                expand: false,
+                height: 44,
+                onPressed: () => confirmRefund(context),
+              ),
+            ),
+          ],
         ];
         final side = <Widget>[
           RecoveryTracker(booking: booking, vouchers: vouchers, cases: trip.cases),
@@ -142,7 +159,22 @@ class _TripScreenState extends State<TripScreen> {
                 : 'Same route and cabin, earliest arrival first. Times are local to each airport.',
             style: t.bodySmall?.copyWith(color: K.textSecondary)),
         const SizedBox(height: K.s4),
-        if (flights.isEmpty)
+        if (flights.isEmpty && trip.noSeatsCaseOpen)
+          KCard(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('No seats left', style: t.titleMedium),
+              const SizedBox(height: K.s2),
+              Text(
+                'No other flight on your route has a seat left in your cabin. We\'ve opened a case, '
+                'and a Kenya Airways agent will contact you with a way to travel. Any hotel or meal '
+                'vouchers you\'re owed are ready now.',
+                style: t.bodyMedium?.copyWith(color: K.textSecondary),
+              ),
+              const SizedBox(height: K.s4),
+              SecondaryButton(label: 'View vouchers', onPressed: () => shell.go(Section.vouchers)),
+            ]),
+          )
+        else if (flights.isEmpty)
           KCard(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('No seats on other flights', style: t.titleMedium),
@@ -168,6 +200,37 @@ class _TripScreenState extends State<TripScreen> {
           ),
       ];
     }
+    final delay = booking.delayMinutes;
+    if (delay != null) {
+      final f = booking.original;
+      return [
+        KCard(
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const IconChip(Icons.schedule, color: K.amber, background: K.amberSoft),
+            const SizedBox(width: K.s4),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Delayed by ${hoursMinutes(delay)}', style: t.titleMedium),
+                const SizedBox(height: K.s1),
+                Text('Now leaves ${dayLabel(f.departureLocal)} at ${hhmm(f.departureLocal)}, '
+                    'instead of ${hhmm(f.scheduledDepartureLocal)}.',
+                    style: t.bodyMedium),
+                const SizedBox(height: K.s2),
+                Text(
+                  'You keep your seat. A delay doesn\'t come with a free change of flight; what you\'re '
+                  'entitled to for the wait is listed under What you\'re entitled to.',
+                  style: t.bodySmall?.copyWith(color: K.textSecondary),
+                ),
+              ]),
+            ),
+          ]),
+        ),
+      ];
+    }
+    final refund = trip.claim('REFUND');
+    if (booking.isCancelled && refund != null) {
+      return [const SectionHeader('Your refund'), const SizedBox(height: K.s2), ClaimCard(claim: refund)];
+    }
     if (booking.isRebooked) {
       final live = trip.vouchers.where((v) => v.isLive).toList();
       return [
@@ -192,14 +255,21 @@ class _Greeting extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final name = booking.firstName.isNotEmpty ? booking.firstName : booking.lastName;
-    final line = booking.isRebooked
+    final delay = booking.delayMinutes;
+    final line = booking.isCancelled
+        ? 'Your booking is cancelled and your refund has been requested.'
+        : booking.isRebooked
         ? 'You\'re rebooked. Here\'s your new trip and what you\'re entitled to.'
+        : booking.isDisruptedAgain
+            ? 'Your new flight was cancelled too. Choose another and we\'ll update your vouchers.'
         : booking.isDisrupted
             ? booking.isConnecting
                 ? 'Your connection in ${city(booking.original.destination)} is affected. Here\'s how to '
                     'get to ${city(booking.finalDestination)}.'
                 : 'Your flight was cancelled. Here\'s everything you need to get moving.'
-            : 'Here\'s your trip.';
+            : delay != null
+                ? 'Your flight is delayed by ${hoursMinutes(delay)}. You keep your seat.'
+                : 'Here\'s your trip.';
     return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Expanded(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

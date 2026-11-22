@@ -79,6 +79,16 @@ Recommendation? recommend(Trip trip, {DateTime? now}) {
   final booking = trip.booking;
   if (booking.isDisrupted) {
     final flights = trip.alternatives;
+    if (flights.isEmpty && trip.noSeatsCaseOpen) {
+      // The server already handed the case to a person (and gave a hotel if stranded).
+      return const Recommendation(
+        text: 'No seats are left on other flights. We\'ve passed your case to a Kenya Airways agent, '
+            'who will find you a way to travel. Any hotel or meal vouchers are ready now.',
+        question: 'Want to see your vouchers?',
+        action: RecommendedAction.vouchers,
+        actionLabel: 'View vouchers',
+      );
+    }
     if (flights.isEmpty) {
       return const Recommendation(
         text: 'There are no free seats in your cabin on other flights right now. A Kenya Airways '

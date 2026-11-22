@@ -5,6 +5,7 @@ import '../state/trip.dart';
 import '../theme.dart';
 import '../widgets/api_error.dart';
 import '../widgets/cards.dart';
+import '../widgets/claims.dart';
 import '../widgets/common.dart';
 import '../widgets/layout.dart';
 import '../widgets/skeleton.dart';
@@ -57,6 +58,8 @@ class VouchersScreen extends StatelessWidget {
             Padding(padding: const EdgeInsets.only(bottom: K.s3), child: VoucherCard(voucher: v)),
         ];
         final rules = <Widget>[
+          // Migration 016: the compensation the rules give, and the claim.
+          if (trip != null) ...[CompensationPanel(trip: trip), const SizedBox(height: K.s3)],
           if (decision != null) EntitlementsCard(decision: decision),
           if (decision?.regulation != null) ...[
             const SizedBox(height: K.s3),

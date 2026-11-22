@@ -179,6 +179,14 @@ class KestrelApi {
         }),
       ));
 
+  /// Migration 016: claim the compensation the rules give (amount from the server).
+  Future<Claim> claimCompensation() async =>
+      Claim(await _send(_http.post(_api('/api/compensation/claim'), headers: _headers)));
+
+  /// Migration 016: cancel the booking and request a refund (a REFUND claim).
+  Future<Map<String, dynamic>> cancelForRefund() =>
+      _send(_http.post(_api('/api/booking/cancel'), headers: _headers));
+
   /// FR-16: the seats of the passenger's cabin on one of their alternatives.
   Future<SeatMap> seatMap(String flightId) async =>
       SeatMap(await _send(_http.get(_api('/api/flights/$flightId/seats'), headers: _headers)));
@@ -215,6 +223,27 @@ class KestrelApi {
         headers: _staffHeaders,
         body: jsonEncode({'resolved_by': by, 'note': note}),
       )));
+
+  /// Compensation and refund claims, newest first. [status] is CLAIMED,
+  /// APPROVED, REJECTED, PAID or ALL.
+  Future<List<Claim>> staffClaims({String status = 'ALL', int limit = 200}) async {
+    final body = await _send(_http.get(
+      _api('/api/staff/claims', {'status': status, 'limit': '$limit'}),
+      headers: _staffHeaders,
+    ));
+    return asList(body['claims']).map(Claim.new).toList();
+  }
+
+  Future<Claim> approveClaim(int id, {required String by}) => _moveClaim(id, 'approve', {'by': by});
+  Future<Claim> rejectClaim(int id, {required String by, required String reason}) =>
+      _moveClaim(id, 'reject', {'by': by, 'reason': reason});
+
+  /// Records the payout reference; no money moves through Kestrel.
+  Future<Claim> payClaim(int id, {required String by, required String reference}) =>
+      _moveClaim(id, 'pay', {'by': by, 'payout_reference': reference});
+
+  Future<Claim> _moveClaim(int id, String step, Map<String, String> body) async => Claim(await _send(
+      _http.post(_api('/api/staff/claims/$id/$step'), headers: _staffHeaders, body: jsonEncode(body))));
 
   // -- Conversation memory (the REST tier keeps it per booking) ---------------
 

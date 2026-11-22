@@ -11,6 +11,7 @@ import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/layout.dart';
 import '../widgets/shell.dart';
+import 'staff_claims.dart';
 
 /// FR-09 · Disruption desk. Staff see the cases the assistant handed to a
 /// person (newest first), read what it already did, and resolve each case
@@ -50,6 +51,9 @@ class _StaffDeskScreenState extends State<StaffDeskScreen> {
   _Filter _filter = _Filter.open;
   int? _selectedId;
   String _query = '';
+
+  /// The Compensation tab (migration 016) instead of the case queue.
+  bool _claims = false;
 
   @override
   void initState() {
@@ -152,10 +156,15 @@ class _StaffDeskScreenState extends State<StaffDeskScreen> {
           body: SafeArea(
             child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               _StaffSidebar(
-                filter: _filter,
+                filter: _claims ? null : _filter,
+                claims: _claims,
+                onClaims: () => setState(() => _claims = true),
                 count: _cases == null ? null : _count,
                 staffName: name,
-                onFilter: (f) => setState(() => _filter = f),
+                onFilter: (f) => setState(() {
+                  _filter = f;
+                  _claims = false;
+                }),
                 onSignOut: session.signOut,
               ),
               Expanded(
@@ -166,7 +175,7 @@ class _StaffDeskScreenState extends State<StaffDeskScreen> {
                     onQuery: (q) => setState(() => _query = q),
                     staffName: name,
                   ),
-                  Expanded(child: _content(phone: false)),
+                  Expanded(child: _claims ? const StaffClaimsView() : _content(phone: false)),
                 ]),
               ),
             ]),
@@ -196,7 +205,21 @@ class _StaffDeskScreenState extends State<StaffDeskScreen> {
             const SizedBox(width: K.s2),
           ],
         ),
-        body: _content(phone: true),
+        body: Column(children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(K.s4, K.s3, K.s4, 0),
+            child: SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment(value: false, label: Text('Cases')),
+                ButtonSegment(value: true, label: Text('Compensation')),
+              ],
+              selected: {_claims},
+              showSelectedIcon: false,
+              onSelectionChanged: (s) => setState(() => _claims = s.first),
+            ),
+          ),
+          Expanded(child: _claims ? const StaffClaimsView(phone: true) : _content(phone: true)),
+        ]),
       );
     });
   }
@@ -314,12 +337,16 @@ class _StaffDeskScreenState extends State<StaffDeskScreen> {
 class _StaffSidebar extends StatelessWidget {
   const _StaffSidebar({
     required this.filter,
+    required this.claims,
+    required this.onClaims,
     required this.count,
     required this.staffName,
     required this.onFilter,
     required this.onSignOut,
   });
-  final _Filter filter;
+  final _Filter? filter;
+  final bool claims;
+  final VoidCallback onClaims;
   final int Function(_Filter)? count;
   final String staffName;
   final ValueChanged<_Filter> onFilter;
@@ -356,6 +383,8 @@ class _StaffSidebar extends StatelessWidget {
                   onTap: () => onFilter(f),
                 ),
               ),
+            const SizedBox(height: K.s3),
+            NavItem(icon: Icons.payments_outlined, label: 'Compensation', selected: claims, onTap: onClaims),
           ]),
         ),
         const Spacer(),

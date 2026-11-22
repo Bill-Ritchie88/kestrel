@@ -459,6 +459,7 @@ IconData entitlementIcon(String type) => switch (type) {
       'TRANSPORT' => Icons.directions_car,
       'ASANTE_POINTS' => Icons.stars,
       'CASH_COMPENSATION' => Icons.payments,
+      'REFUND' => Icons.undo,
       _ => Icons.card_giftcard,
     };
 
@@ -468,6 +469,7 @@ String entitlementName(String type) => switch (type) {
       'TRANSPORT' => 'Airport transfer',
       'ASANTE_POINTS' => 'Asante Rewards points',
       'CASH_COMPENSATION' => 'Compensation',
+      'REFUND' => 'Refund',
       _ => titleCase(type.replaceAll('_', ' ')),
     };
 

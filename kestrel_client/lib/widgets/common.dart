@@ -261,6 +261,11 @@ class StatusPill extends StatelessWidget {
         'VOID' => ('Void', K.textSecondary),
         'OPEN' => ('Open', K.amber),
         'RESOLVED' => ('Resolved', K.teal),
+        // Claims (migration 016).
+        'CLAIMED' => ('Claimed', K.amber),
+        'APPROVED' => ('Approved', K.teal),
+        'REJECTED' => ('Rejected', K.glow),
+        'PAID' => ('Paid', K.teal),
         _ => (titleCase(status), K.amber),
       };
 

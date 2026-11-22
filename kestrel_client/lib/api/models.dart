@@ -43,6 +43,10 @@ class Flight {
   String? get finalDestination => json['final_destination'] as String?;
   int? get connectionMinutes => (json['connection_minutes'] as num?)?.toInt();
 
+  /// Migration 016: how late a DELAYED flight now leaves, and when it was due.
+  int? get delayMinutes => (json['delay_minutes'] as num?)?.toInt();
+  String? get scheduledDepartureLocal => json['scheduled_departure_local'] as String?;
+
   /// The legs that need a seat chosen: the first leg and the onward flight,
   /// each unless kept.
   List<Flight> get legsToSeat => [
@@ -121,6 +125,19 @@ class Booking {
   String get finalDestination => json['final_destination'] as String? ?? original.destination;
   bool get isDisrupted => status == 'DISRUPTED';
   bool get isRebooked => status == 'REACCOMMODATED';
+
+  /// Cancelled for a refund (migration 016).
+  bool get isCancelled => status == 'CANCELLED';
+
+  /// "Cancel and request a refund" is offered (the server's rule; the
+  /// database procedure enforces it).
+  bool get refundable => json['refundable'] == true;
+
+  /// Disrupted again: the flight it was rebooked onto was cancelled too.
+  bool get isDisruptedAgain => isDisrupted && current != null;
+
+  /// A delay on the booked flight (it keeps its seat), in minutes.
+  int? get delayMinutes => status == 'CONFIRMED' ? original.delayMinutes : null;
 }
 
 class Voucher {
@@ -215,6 +232,30 @@ class Suggestion {
   String get message => json['message'] as String? ?? label;
 }
 
+/// A compensation or refund claim (migration 016): CLAIMED, then APPROVED or
+/// REJECTED (with a reason), then PAID (with the payout reference staff enter).
+class Claim {
+  Claim(this.json);
+  final Map<String, dynamic> json;
+
+  int get id => (json['claim_id'] as num?)?.toInt() ?? 0;
+  String get pnr => json['pnr_code'] as String? ?? '';
+  String get kind => json['kind'] as String? ?? 'COMPENSATION';
+  bool get isRefund => kind == 'REFUND';
+  String get status => json['status'] as String? ?? 'CLAIMED';
+  double? get amount => (json['amount'] as num?)?.toDouble();
+  String? get currency => json['currency'] as String?;
+  String get basis => json['basis'] as String? ?? '';
+  String? get reason => json['reason'] as String?;
+  String? get payoutReference => json['payout_reference'] as String?;
+  String? get decidedBy => json['decided_by'] as String?;
+  String? get createdAt => json['created_at'] as String?;
+  String get passengerName {
+    final p = _map(json['passenger']);
+    return [p['first_name'], p['last_name']].whereType<String>().join(' ');
+  }
+}
+
 /// GET /api/trip: everything My trip, Flights, Vouchers and Help show, in
 /// the shapes of the single endpoints.
 class Trip {
@@ -229,6 +270,11 @@ class Trip {
   List<Voucher> get vouchers => _list(_map(json['entitlements'])['vouchers']).map(Voucher.new).toList();
   List<HandoffCase> get cases => _list(json['cases']).map(HandoffCase.new).toList();
   List<Suggestion> get suggestions => _list(json['suggestions']).map(Suggestion.new).toList();
+  List<Claim> get claims => _list(json['claims']).map(Claim.new).toList();
+  Claim? claim(String kind) => claims.where((c) => c.kind == kind).firstOrNull;
+
+  /// No later flight had a seat: the server opened a case (and a hotel when stranded).
+  bool get noSeatsCaseOpen => cases.any((c) => c.isOpen && c.trigger == 'NO_ALTERNATIVES');
 }
 
 /// A booking under the signed-in account's verified email, offered for
