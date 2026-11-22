@@ -253,6 +253,8 @@ class StatusPill extends StatelessWidget {
 
   static (String, Color) _look(String status) => switch (status) {
         'CANCELLED' || 'DISRUPTED' => ('Cancelled', K.glow),
+        'MISSED_CONNECTION' => ('Missed connection', K.glow),
+        'SCHEDULED' => ('On time', K.teal),
         'REACCOMMODATED' || 'CONFIRMED' || 'ISSUED' => ('Confirmed', K.teal),
         'ELIGIBLE' => ('Eligible', K.amber),
         'REDEEMED' => ('Redeemed', K.textSecondary),

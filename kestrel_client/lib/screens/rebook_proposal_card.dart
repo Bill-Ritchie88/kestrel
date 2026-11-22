@@ -44,6 +44,9 @@ class _RebookProposalCardState extends State<RebookProposalCard> {
         _flight.id,
         seatId: widget.proposal['seat_id'] as String?,
         confirmationToken: widget.proposal['confirmation_token'] as String?,
+        // A journey through Nairobi (migration 015): the token binds both legs.
+        onwardFlightId: _flight.onward?.id,
+        onwardSeatId: widget.proposal['onward_seat_id'] as String?,
       );
       trip?.refreshQuietly();
       if (!mounted) return;
@@ -72,7 +75,10 @@ class _RebookProposalCardState extends State<RebookProposalCard> {
         Text(
           _done
               ? 'Rebooked. Your trip has been updated.'
-              : 'Nothing changes until you confirm. Kestrel will choose your seat, or you can pick one.',
+              : _flight.isJourney
+                  ? 'Nothing changes until you confirm. Both flights are rebooked together; Kestrel will '
+                      'choose your seats, or you can pick them.'
+                  : 'Nothing changes until you confirm. Kestrel will choose your seat, or you can pick one.',
           style: t.bodySmall?.copyWith(color: K.textSecondary),
         ),
         const SizedBox(height: K.s3),

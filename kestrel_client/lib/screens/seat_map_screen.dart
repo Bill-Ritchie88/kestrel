@@ -15,9 +15,14 @@ import 'confirm_screen.dart';
 /// procedure), so two passengers can pick the same seat here; the second to
 /// confirm is sent back with "That seat was just taken" and a fresh map.
 ///
+/// A journey option through Nairobi (migration 015) has a seat chosen on
+/// each leg that changes, one map after the other; a kept leg keeps its seat.
+///
 /// Pops with `true` when the list of flights should be refreshed.
 class SeatMapScreen extends StatefulWidget {
   const SeatMapScreen({super.key, required this.flight});
+
+  /// A flight, or a journey option (its first leg, with `onward`).
   final Flight flight;
 
   static const takenMessage = 'That seat was just taken. Please pick another';
@@ -34,6 +39,18 @@ class _SeatMapScreenState extends State<SeatMapScreen> {
   /// Shown after a 409 SEAT_TAKEN from Confirm.
   String? _notice;
 
+  /// The leg whose map is shown, and the choices on the legs before it
+  /// (null: Kestrel chooses).
+  int _step = 0;
+  final List<Seat?> _chosen = [];
+
+  List<Flight> get _legs {
+    final legs = widget.flight.legsToSeat;
+    return legs.isEmpty ? [widget.flight] : legs;
+  }
+
+  Flight get _leg => _legs[_step];
+
   @override
   void initState() {
     super.initState();
@@ -43,7 +60,7 @@ class _SeatMapScreenState extends State<SeatMapScreen> {
   Future<void> _load() async {
     setState(() => _error = null);
     try {
-      final map = await SessionScope.read(context).api.seatMap(widget.flight.id);
+      final map = await SessionScope.read(context).api.seatMap(_leg.id);
       if (mounted) setState(() => _map = map);
     } catch (e) {
       if (!mounted) return;
@@ -53,15 +70,42 @@ class _SeatMapScreenState extends State<SeatMapScreen> {
   }
 
   Future<void> _confirm(Seat? seat) async {
+    final chosen = [..._chosen, seat];
+    if (_step < _legs.length - 1) {
+      // The next leg's map.
+      setState(() {
+        _chosen
+          ..clear()
+          ..addAll(chosen);
+        _step++;
+        _selected = null;
+        _map = null;
+        _notice = null;
+      });
+      await _load();
+      return;
+    }
+    final f = widget.flight;
+    Seat? seatOn(Flight leg) => chosen[_legs.indexWhere((l) => l.id == leg.id)];
     final outcome = await Navigator.of(context).push<ConfirmOutcome>(
-      MaterialPageRoute(builder: (_) => ConfirmScreen(flight: widget.flight, seat: seat)),
+      MaterialPageRoute(
+        builder: (_) => ConfirmScreen(
+          flight: f,
+          seat: f.kept ? null : seatOn(f),
+          onwardSeat: f.onward == null || f.onward!.kept ? null : seatOn(f.onward!),
+        ),
+      ),
     );
     if (!mounted) return;
     switch (outcome) {
       case ConfirmOutcome.seatTaken:
+        // From the first map again, as the seats are now.
         setState(() {
           _notice = SeatMapScreen.takenMessage;
           _selected = null;
+          _chosen.clear();
+          _step = 0;
+          _map = null;
         });
         await _load();
       case ConfirmOutcome.chooseAnotherFlight:
@@ -79,13 +123,20 @@ class _SeatMapScreenState extends State<SeatMapScreen> {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-    final f = widget.flight;
+    final f = _leg;
     final map = _map;
     final selected = _selected;
+    final journey = _legs.length > 1;
     return Scaffold(
-      appBar: AppBar(title: const Text('Choose your seat')),
+      appBar: AppBar(
+        title: Text(journey ? 'Choose your seat · flight ${_step + 1} of ${_legs.length}' : 'Choose your seat'),
+      ),
       body: PageList(
         children: [
+          if (widget.flight.isJourney) ...[
+            Text('${f.number}: ${city(f.origin)} to ${city(f.destination)}', style: t.titleMedium),
+            const SizedBox(height: K.s1),
+          ],
           Text(
             '${f.number} · ${dayLabel(f.departureLocal)} · ${titleCase(map?.cabin ?? f.cabin ?? 'economy')}. '
             'Pick a free seat, or let Kestrel choose one for you.',

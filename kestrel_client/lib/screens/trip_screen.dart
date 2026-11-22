@@ -129,9 +129,17 @@ class _TripScreenState extends State<TripScreen> {
     if (booking.isDisrupted) {
       final f = booking.original;
       return [
-        SectionHeader('Flights from ${city(f.origin)}',
-            action: 'View all', onAction: () => shell.go(Section.flights)),
-        Text('Same route and cabin, earliest arrival first. Times are local to each airport.',
+        SectionHeader(
+            booking.isConnecting
+                ? 'Journeys to ${city(booking.finalDestination)}'
+                : 'Flights from ${city(f.origin)}',
+            action: 'View all',
+            onAction: () => shell.go(Section.flights)),
+        Text(
+            booking.isConnecting
+                ? 'Both flights via ${city(f.destination)}, same cabin, earliest arrival first. '
+                    'Times are local to each airport.'
+                : 'Same route and cabin, earliest arrival first. Times are local to each airport.',
             style: t.bodySmall?.copyWith(color: K.textSecondary)),
         const SizedBox(height: K.s4),
         if (flights.isEmpty)
@@ -187,7 +195,10 @@ class _Greeting extends StatelessWidget {
     final line = booking.isRebooked
         ? 'You\'re rebooked. Here\'s your new trip and what you\'re entitled to.'
         : booking.isDisrupted
-            ? 'Your flight was cancelled. Here\'s everything you need to get moving.'
+            ? booking.isConnecting
+                ? 'Your connection in ${city(booking.original.destination)} is affected. Here\'s how to '
+                    'get to ${city(booking.finalDestination)}.'
+                : 'Your flight was cancelled. Here\'s everything you need to get moving.'
             : 'Here\'s your trip.';
     return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Expanded(

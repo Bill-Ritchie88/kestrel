@@ -57,8 +57,9 @@ class AlternativesScreen extends StatelessWidget {
             'Other flights',
             subtitle: f == null
                 ? null
-                : '${city(f.origin)} to ${city(f.destination)} · same cabin '
-                    '(${titleCase(booking!.cabin)}), earliest arrival first. '
+                : '${city(f.origin)} to ${city(booking!.finalDestination)}'
+                    '${booking.isConnecting ? ' via ${city(f.destination)}' : ''} · same cabin '
+                    '(${titleCase(booking.cabin)}), earliest arrival first. '
                     'All times are local to each airport.',
           ),
           const SizedBox(height: K.s5),

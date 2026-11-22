@@ -45,11 +45,13 @@ class TripTicket extends StatelessWidget {
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('${shown.number} · ${dayLabel(shown.departureLocal)}', style: t.titleMedium),
                 Text(
-                  rebooked
-                      ? 'Your new flight'
-                      : booking.isDisrupted
-                          ? 'Your original flight'
-                          : 'Your flight',
+                  booking.isConnecting
+                      ? 'Your journey to ${city(booking.finalDestination)}, via ${city(f.destination)}'
+                      : rebooked
+                          ? 'Your new flight'
+                          : booking.isDisrupted
+                              ? 'Your original flight'
+                              : 'Your flight',
                   style: small,
                 ),
               ]),
@@ -62,9 +64,13 @@ class TripTicket extends StatelessWidget {
             destination: f.destination,
             departureLocal: shown.departureLocal,
             arrivalLocal: shown.arrivalLocal,
-            cancelled: !rebooked && booking.isDisrupted,
+            cancelled: !rebooked && booking.isDisrupted && f.status == 'CANCELLED',
             compact: compact,
           ),
+          if (booking.isConnecting) ...[
+            const SizedBox(height: K.s3),
+            _JourneyLegs(booking: booking, rebooked: rebooked),
+          ],
           const SizedBox(height: K.s3),
           TicketDivider(inset: pad, notchColor: notchColor),
           const SizedBox(height: K.s3),
@@ -72,9 +78,13 @@ class TripTicket extends StatelessWidget {
             if (!compact && name.isNotEmpty) _Meta('Passenger', name),
             if (!compact) _Meta('Booking', booking.pnr),
             _Meta('Cabin', titleCase(booking.cabin)),
-            if (rebooked) _Meta('Seat', booking.seat ?? '-') else _Meta('Rewards', titleCase(booking.tier)),
+            if (rebooked)
+              _Meta(booking.isConnecting ? 'Seats' : 'Seat',
+                  [booking.seat ?? '-', if (booking.isConnecting) booking.onwardSeat ?? '-'].join(' · '))
+            else
+              _Meta('Rewards', titleCase(booking.tier)),
           ]),
-          if (!rebooked && booking.isDisrupted && reason != null) ...[
+          if (!rebooked && booking.isDisrupted && reason != null && f.status == 'CANCELLED') ...[
             const SizedBox(height: K.s3),
             Text('Cancelled because of $reason.', style: small),
           ],
@@ -91,6 +101,48 @@ class TripTicket extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// The two legs of a journey through Nairobi (migration 015) on the ticket:
+/// each with its status ("Missed connection" when the first flight lands too
+/// late or is cancelled) or, once rebooked, the new onward flight.
+class _JourneyLegs extends StatelessWidget {
+  const _JourneyLegs({required this.booking, required this.rebooked});
+  final Booking booking;
+  final bool rebooked;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final small = t.bodySmall?.copyWith(color: K.textSecondary);
+    final onward = booking.currentOnward;
+    if (rebooked && onward != null) {
+      final hub = booking.original.destination;
+      return Text(
+        'Then ${onward.number} · $hub to ${booking.finalDestination} · '
+        '${dayLabel(onward.departureLocal)} ${hhmm(onward.departureLocal)}-${hhmm(onward.arrivalLocal)}'
+        '${booking.onwardSeat == null ? '' : ' · seat ${booking.onwardSeat}'}',
+        style: small,
+      );
+    }
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      for (final leg in booking.legs)
+        Padding(
+          padding: const EdgeInsets.only(top: K.s2),
+          child: Row(children: [
+            Expanded(
+              child: Text(
+                'Leg ${leg.number} · ${leg.flightNumber} · ${leg.origin} to ${leg.destination} · '
+                '${hhmm(leg.departureLocal)}',
+                style: t.bodyMedium,
+              ),
+            ),
+            const SizedBox(width: K.s2),
+            StatusPill(leg.status),
+          ]),
+        ),
+    ]);
   }
 }
 
@@ -227,7 +279,8 @@ class FlightOptionCard extends StatelessWidget {
     );
     final meta = Wrap(spacing: K.s3, runSpacing: K.s1, crossAxisAlignment: WrapCrossAlignment.center, children: [
       Text(dayLabel(flight.departureLocal), style: t.bodySmall?.copyWith(color: K.textSecondary)),
-      Text('Same route', style: t.bodySmall?.copyWith(color: K.teal, fontWeight: FontWeight.w600)),
+      Text(flight.isJourney ? 'Via ${city(flight.destination)}' : 'Same route',
+          style: t.bodySmall?.copyWith(color: K.teal, fontWeight: FontWeight.w600)),
       Row(mainAxisSize: MainAxisSize.min, children: [
         Icon(Icons.event_seat, size: 15, color: seatColor),
         const SizedBox(width: K.s1),
@@ -241,6 +294,7 @@ class FlightOptionCard extends StatelessWidget {
       semanticLabel: '${badges.map((b) => '${titleCase(badgeLook(b).$1)}. ').join()}'
           'Flight ${flight.number}, ${dayLabel(flight.departureLocal)}, '
           'departs ${hhmm(flight.departureLocal)}, arrives ${hhmm(flight.arrivalLocal)}, '
+          '${_onwardLabel(flight)}'
           '$seats ${seats == 1 ? 'seat' : 'seats'} left in ${titleCase(flight.cabin ?? '')}. '
           'Double tap to choose.',
       child: ExcludeSemantics(
@@ -253,6 +307,7 @@ class FlightOptionCard extends StatelessWidget {
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   if (badges.isNotEmpty) ...[tag, const SizedBox(height: K.s1)],
                   route,
+                  if (flight.isJourney) ...[const SizedBox(height: K.s2), _OnwardLeg(flight: flight)],
                   const SizedBox(height: K.s2),
                   meta,
                 ]),
@@ -276,6 +331,7 @@ class FlightOptionCard extends StatelessWidget {
             if (badges.isNotEmpty) ...[const SizedBox(height: K.s1), tag],
             const SizedBox(height: K.s3),
             route,
+            if (flight.isJourney) ...[const SizedBox(height: K.s3), _OnwardLeg(flight: flight)],
             const SizedBox(height: K.s3),
             Row(children: [
               Icon(Icons.event_seat, size: 16, color: seatColor),
@@ -291,6 +347,46 @@ class FlightOptionCard extends StatelessWidget {
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       card,
       WhyThisFlight(reasons: flight.reasons),
+    ]);
+  }
+}
+
+String _onwardLabel(Flight f) {
+  final o = f.onward;
+  if (o == null) return '';
+  return '${f.kept ? 'Keeps your booked flight. ' : ''}Then ${o.number}${o.kept ? ', your booked flight,' : ''} '
+      'from ${city(o.origin)}, departs ${hhmm(o.departureLocal)}, arrives ${city(o.destination)} '
+      '${hhmm(o.arrivalLocal)}. ';
+}
+
+/// The second leg of a journey option through Nairobi (migration 015).
+class _OnwardLeg extends StatelessWidget {
+  const _OnwardLeg({required this.flight});
+  final Flight flight;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final o = flight.onward!;
+    final small = t.bodySmall?.copyWith(color: K.textSecondary);
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(
+        [
+          if (flight.kept) 'Your booked flight',
+          '${flight.connectionMinutes ?? '-'} min to connect in ${city(o.origin)}',
+        ].join(' · '),
+        style: small,
+      ),
+      const SizedBox(height: K.s2),
+      Text('Then ${o.number}${o.kept ? ' · your booked flight' : ''}', style: t.titleSmall),
+      const SizedBox(height: K.s1),
+      RouteLine(
+        origin: o.origin,
+        destination: o.destination,
+        departureLocal: o.departureLocal,
+        arrivalLocal: o.arrivalLocal,
+        compact: true,
+      ),
     ]);
   }
 }

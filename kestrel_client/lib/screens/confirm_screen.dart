@@ -27,12 +27,18 @@ enum ConfirmOutcome {
 /// atomic stored procedure: the [seat] the passenger chose (row lock,
 /// NOWAIT), or the first free one (SKIP LOCKED). If it goes to someone else
 /// first the server answers 409 and the page pops with a [ConfirmOutcome].
+///
+/// A journey option through Nairobi (migration 015) is confirmed as one: both
+/// legs are rebooked together or not at all.
 class ConfirmScreen extends StatefulWidget {
-  const ConfirmScreen({super.key, required this.flight, this.seat});
+  const ConfirmScreen({super.key, required this.flight, this.seat, this.onwardSeat});
+
+  /// A flight, or a journey option (its first leg, with `onward`).
   final Flight flight;
 
-  /// Null: "Let Kestrel choose".
+  /// Null: "Let Kestrel choose" (or, on a kept leg, the seat already held).
   final Seat? seat;
+  final Seat? onwardSeat;
 
   @override
   State<ConfirmScreen> createState() => _ConfirmScreenState();
@@ -51,7 +57,12 @@ class _ConfirmScreenState extends State<ConfirmScreen> {
       _error = null;
     });
     try {
-      final result = await session.api.rebook(widget.flight.id, seatId: widget.seat?.id);
+      final result = await session.api.rebook(
+        widget.flight.id,
+        seatId: widget.seat?.id,
+        onwardFlightId: widget.flight.onward?.id,
+        onwardSeatId: widget.onwardSeat?.id,
+      );
       // The confirmation shows the booking the rebooking returned; the trip
       // everywhere else catches up behind it.
       trip?.refreshQuietly();
@@ -85,14 +96,26 @@ class _ConfirmScreenState extends State<ConfirmScreen> {
     final t = Theme.of(context).textTheme;
     final booking = SessionScope.of(context).booking;
     final f = widget.flight;
+    final seats = [
+      if (widget.seat != null) widget.seat!.number,
+      if (widget.onwardSeat != null) widget.onwardSeat!.number,
+    ];
     return Scaffold(
-      appBar: AppBar(title: const Text('Confirm your new flight')),
+      appBar: AppBar(title: Text(f.isJourney ? 'Confirm your new journey' : 'Confirm your new flight')),
       body: PageList(
         children: [
           Text('Check the details, then confirm. There is no charge for this change.',
               style: t.bodyMedium?.copyWith(color: K.textSecondary)),
           const SizedBox(height: K.s5),
-          if (booking != null) ...[
+          if (booking != null && booking.isConnecting) ...[
+            const SectionLabel('Your journey now'),
+            const SizedBox(height: K.s2),
+            TripTicket(booking: booking, compact: true),
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: K.s3),
+              child: Center(child: IconChip(Icons.arrow_downward, size: 40)),
+            ),
+          ] else if (booking != null) ...[
             const SectionLabel('Cancelled'),
             const SizedBox(height: K.s2),
             Opacity(
@@ -117,16 +140,19 @@ class _ConfirmScreenState extends State<ConfirmScreen> {
               child: Center(child: IconChip(Icons.arrow_downward, size: 40)),
             ),
           ],
-          const SectionLabel('Your new flight'),
+          SectionLabel(f.isJourney ? 'Your new journey' : 'Your new flight'),
           const SizedBox(height: K.s2),
           FlightOptionCard(flight: f, recommended: false),
           const SizedBox(height: K.s4),
-          if (widget.seat != null) ...[
+          if (seats.isNotEmpty) ...[
             Row(children: [
               const Icon(Icons.event_seat, size: 22, color: K.glow),
               const SizedBox(width: K.s2),
-              Text('Seat ${widget.seat!.number} · ${titleCase(f.cabin ?? booking?.cabin ?? 'economy')}',
-                  style: K.dataMd(context)),
+              Flexible(
+                child: Text('${seats.length > 1 ? 'Seats' : 'Seat'} ${seats.join(' and ')} · '
+                    '${titleCase(f.cabin ?? booking?.cabin ?? 'economy')}',
+                    style: K.dataMd(context)),
+              ),
             ]),
             const SizedBox(height: K.s2),
           ],
@@ -135,11 +161,15 @@ class _ConfirmScreenState extends State<ConfirmScreen> {
             const SizedBox(width: K.s2),
             Expanded(
               child: Text(
-                widget.seat != null
-                    ? 'Seat ${widget.seat!.number} is yours once you confirm, and we\'ll issue any '
-                        'vouchers you\'re entitled to straight away.'
-                    : 'We\'ll hold ${_withArticle(titleCase(f.cabin ?? booking?.cabin ?? 'economy'))} seat for you '
-                        'and issue any vouchers you\'re entitled to straight away.',
+                f.isJourney
+                    ? 'Both flights are rebooked together, or neither is. Kestrel holds a seat on any '
+                        'flight where you didn\'t pick one, and we\'ll issue any vouchers you\'re '
+                        'entitled to straight away.'
+                    : widget.seat != null
+                        ? 'Seat ${widget.seat!.number} is yours once you confirm, and we\'ll issue any '
+                            'vouchers you\'re entitled to straight away.'
+                        : 'We\'ll hold ${_withArticle(titleCase(f.cabin ?? booking?.cabin ?? 'economy'))} seat for you '
+                            'and issue any vouchers you\'re entitled to straight away.',
                 style: t.bodySmall?.copyWith(color: K.textSecondary),
               ),
             ),
@@ -221,7 +251,8 @@ class ConfirmedScreen extends StatelessWidget {
               Text('You\'re rebooked', style: t.headlineSmall, textAlign: TextAlign.center),
               const SizedBox(height: K.s1),
               Text(
-                'Seat ${result['assigned_seat'] ?? booking?.seat ?? ''}'
+                '${result['onward_seat'] != null ? 'Seats' : 'Seat'} '
+                '${[result['assigned_seat'] ?? booking?.seat ?? '', if (result['onward_seat'] != null) result['onward_seat']].join(' and ')}'
                 '${booking == null ? '' : ' · ${titleCase(booking.cabin)}'}',
                 style: K.dataMd(context),
                 textAlign: TextAlign.center,

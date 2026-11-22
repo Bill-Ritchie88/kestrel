@@ -33,6 +33,38 @@ class Flight {
   List<String> get badges => (json['badges'] as List?)?.map((e) => e.toString()).toList() ?? const [];
   double? get waitHours => (json['wait_hours'] as num?)?.toDouble();
   List<Map<String, dynamic>> get includes => _list(json['includes']);
+
+  /// A journey option through Nairobi (migration 015): this flight is the
+  /// first leg, [onward] the second, to [finalDestination]. [kept]: the
+  /// passenger's own flight on that leg, which needs no new seat.
+  Flight? get onward => json['onward'] is Map ? Flight(_map(json['onward'])) : null;
+  bool get isJourney => onward != null;
+  bool get kept => json['kept'] == true;
+  String? get finalDestination => json['final_destination'] as String?;
+  int? get connectionMinutes => (json['connection_minutes'] as num?)?.toInt();
+
+  /// The legs that need a seat chosen: the first leg and the onward flight,
+  /// each unless kept.
+  List<Flight> get legsToSeat => [
+        if (!kept) this,
+        if (onward != null && !onward!.kept) onward!,
+      ];
+}
+
+/// One leg of a journey through Nairobi on My trip, with its status:
+/// CANCELLED, DELAYED, MISSED_CONNECTION or SCHEDULED.
+class Leg {
+  Leg(this.json);
+  final Map<String, dynamic> json;
+
+  int get number => (json['leg'] as num?)?.toInt() ?? 1;
+  String get flightNumber => json['flight_number'] as String? ?? '';
+  String get origin => json['origin'] as String? ?? '';
+  String get destination => json['destination'] as String? ?? '';
+  String? get departureLocal => json['departure_local'] as String?;
+  String? get arrivalLocal => json['arrival_local'] as String?;
+  String get status => json['leg_status'] as String? ?? 'SCHEDULED';
+  bool get isAffected => status != 'SCHEDULED';
 }
 
 /// One seat of GET /api/flights/{id}/seats.
@@ -77,6 +109,16 @@ class Booking {
       json['current_flight'] == null ? null : Flight(_map(json['current_flight']));
   String? get seat => json['seat_number'] as String?;
   String get cabin => json['cabin_class'] as String? ?? 'ECONOMY';
+
+  /// A journey through Nairobi (migration 015): both legs with their status,
+  /// the onward flight as booked and as rebooked, and its seat.
+  List<Leg> get legs => _list(json['legs']).map(Leg.new).toList();
+  bool get isConnecting => legs.isNotEmpty;
+  Flight? get onward => json['onward_flight'] == null ? null : Flight(_map(json['onward_flight']));
+  Flight? get currentOnward =>
+      json['current_onward_flight'] == null ? null : Flight(_map(json['current_onward_flight']));
+  String? get onwardSeat => json['onward_seat_number'] as String?;
+  String get finalDestination => json['final_destination'] as String? ?? original.destination;
   bool get isDisrupted => status == 'DISRUPTED';
   bool get isRebooked => status == 'REACCOMMODATED';
 }
