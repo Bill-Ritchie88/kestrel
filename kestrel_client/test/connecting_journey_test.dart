@@ -9,6 +9,7 @@ import 'package:kestrel_client/api/models.dart';
 import 'package:kestrel_client/screens/rebook_proposal_card.dart';
 import 'package:kestrel_client/screens/seat_map_screen.dart';
 import 'package:kestrel_client/state/public.dart';
+import 'package:kestrel_client/state/recommend.dart';
 import 'package:kestrel_client/state/session.dart';
 import 'package:kestrel_client/state/shell.dart';
 import 'package:kestrel_client/theme.dart';
@@ -235,5 +236,22 @@ void main() {
       expect(find.text('Refund requested'), findsOneWidget);
       expect(find.text('Travel'), findsNothing);
     });
+  });
+
+  test('Kestrel recommends names the final destination and both flights of a journey', () {
+    Map<String, dynamic> trip(Map<String, dynamic> alt) => {
+          'cities': {'NBO': 'Nairobi', 'EBB': 'Entebbe'},
+          'booking': _booking.json,
+          'alternatives': [alt],
+        };
+    final text = recommend(Trip(trip(_journey())), now: DateTime(2026, 12, 1))!.text;
+    expect(text, contains('KQ601 then KQ412 via Nairobi today at 09:00'));
+    expect(text, contains('the earliest arrival in Entebbe, 6 seats left'));
+    expect(text, isNot(contains('arrival in Nairobi')));
+
+    // A kept first leg needs no seat, so the onward flight's free seats count.
+    final kept = _journey(firstKept: true);
+    (kept['onward'] as Map<String, dynamic>)['available_seats'] = 1;
+    expect(recommend(Trip(trip(kept)), now: DateTime(2026, 12, 1))!.text, contains('1 seat left'));
   });
 }

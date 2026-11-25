@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
 import 'auth/supabase_account_auth.dart';
+import 'config.dart';
 import 'screens/passenger_shell.dart';
 import 'screens/public_site.dart';
 import 'screens/staff_loader.dart';
@@ -11,6 +13,12 @@ import 'theme.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // Free-tier hosts sleep when idle and take up to a minute to wake. Wake both
+  // services now, while the passenger signs in, so the first chat turn isn't
+  // the request that waits (and times out). Fire and forget.
+  for (final base in [AppConfig.apiBase, AppConfig.agentBase]) {
+    http.get(Uri.parse('$base/health')).then((_) {}, onError: (_) {});
+  }
   // Google and emailed-code sign-in, when the build has the Supabase
   // settings. Supabase connects in the background: the first screen never
   // waits for it.

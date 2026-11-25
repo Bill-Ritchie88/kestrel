@@ -99,11 +99,17 @@ Recommendation? recommend(Trip trip, {DateTime? now}) {
       );
     }
     final best = flights.first;
+    // A journey through Nairobi is ranked by arrival at the final destination, and
+    // its free seats are those of the legs that need one (a kept leg needs none).
+    final seats = best.legsToSeat.isEmpty
+        ? best.seatsLeft
+        : best.legsToSeat.map((f) => f.seatsLeft).reduce((a, b) => a < b ? a : b);
     final why = [
       if (best.badges.isEmpty || best.badges.contains('EARLIEST_ARRIVAL'))
-        'the earliest arrival in ${city(best.destination)}',
-      '${best.seatsLeft} ${best.seatsLeft == 1 ? 'seat' : 'seats'} left',
+        'the earliest arrival in ${city(best.finalDestination ?? best.destination)}',
+      '$seats ${seats == 1 ? 'seat' : 'seats'} left',
     ];
+    final name = best.isJourney ? '${best.number} then ${best.onward!.number} via Nairobi' : best.number;
     // With this flight, from the rules; otherwise what applies now.
     final owed = owedItems(best.includes.isNotEmpty
         ? best.includes
@@ -112,7 +118,7 @@ Recommendation? recommend(Trip trip, {DateTime? now}) {
             .map((e) => e.json)
             .toList());
     return Recommendation(
-      text: 'Your best option is ${best.number} ${whenText(best.departureLocal, now: now)} — '
+      text: 'Your best option is $name ${whenText(best.departureLocal, now: now)} — '
           '${why.join(', ')}.'
           '${owed.isEmpty ? '' : ' You\'re owed ${_list(owed)}.'}',
       question: 'Shall I book it?',
